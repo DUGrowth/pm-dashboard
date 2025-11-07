@@ -164,3 +164,8 @@ return ok(fb, 422);
 const safe = postValidate(parsed, b);
 return ok(safe);
 };
+const ok = (data: unknown, status = 200) =>
+new Response(JSON.stringify(data), {
+status,
+headers: { 'content-type': 'application/json' },
+});
