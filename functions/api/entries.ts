@@ -1,3 +1,6 @@
+// Cloudflare Pages Function: /api/entries
+// CRUD for entries backed by D1. All SQL strings are wrapped safely.
+
 type Platform =
   | 'Instagram'
   | 'Facebook'
@@ -28,6 +31,109 @@ type Entry = {
   createdAt: string;
   deletedAt?: string;
 };
+
+type EntrySummary = {
+  id: string;
+  date: string;
+  assetType: AssetType;
+  platforms: Platform[];
+  caption: string;
+  url?: string;
+  approvers: string[];
+  status: Approval;
+};
+
+type NotificationReason = 'created' | 'reopened';
+
+const BREVO_ENDPOINT = 'https://api.brevo.com/v3/smtp/email';
+
+function parseJsonArray(value: any): any[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function hydrateEntry(row: any): EntrySummary {
+  return {
+    id: row.id,
+    date: row.date,
+    assetType: row.assetType,
+    platforms: parseJsonArray(row.platforms) as Platform[],
+    caption: row.caption || '',
+    url: row.url || undefined,
+    approvers: parseJsonArray(row.approvers) as string[],
+    status: row.status as Approval,
+  };
+}
+
+function loadApproverDirectory(env: any): Record<string, string> {
+  const raw = env?.APPROVER_DIRECTORY;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    console.warn('APPROVER_DIRECTORY is not valid JSON');
+    return {};
+  }
+}
+
+async function notifyApprovers(env: any, entry: EntrySummary, reason: NotificationReason) {
+  const apiKey = env?.BREVO_API_KEY;
+  const senderEmail = env?.BREVO_SENDER_EMAIL;
+  if (!apiKey || !senderEmail) return; // notifications disabled
+
+  const senderName = env?.BREVO_SENDER_NAME || 'Content Dashboard';
+  const directory = loadApproverDirectory(env);
+  const recipients = entry.approvers
+    .map((name) => ({ name, email: directory[name] }))
+    .filter((x): x is { name: string; email: string } => Boolean(x.email));
+
+  if (!recipients.length) return;
+
+  const action = reason === 'created' ? 'needs your approval' : 'was updated and needs the review again';
+  const subject = `Content (${entry.assetType}) ${action} for ${entry.date}`;
+  const platforms = entry.platforms.length ? entry.platforms.join(', ') : 'Unspecified platforms';
+  const htmlContent = `
+    <p>Hello,</p>
+    <p>A ${entry.assetType} scheduled for <strong>${entry.date}</strong> ${action}.</p>
+    <p><strong>Platforms:</strong> ${platforms}</p>
+    <p><strong>Caption:</strong></p>
+    <blockquote>${entry.caption || 'No caption yet.'}</blockquote>
+    ${entry.url ? `<p><strong>URL:</strong> <a href="${entry.url}">${entry.url}</a></p>` : ''}
+    <p>Please review and approve in the Content Dashboard.</p>
+  `;
+
+  try {
+    const res = await fetch(BREVO_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'api-key': apiKey,
+      },
+      body: JSON.stringify({
+        sender: { email: senderEmail, name: senderName },
+        to: recipients,
+        subject,
+        htmlContent,
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.error('Brevo notification failed', res.status, text);
+    }
+  } catch (err) {
+    console.error('Brevo notification error', err);
+  }
+}
 
 function corsHeaders(origin?: string | null) {
   return {
@@ -105,6 +211,17 @@ export const onRequestPost: PagesFunction = async ({ request, env }) => {
     null
   ).run();
 
+  await notifyApprovers(env, {
+    id,
+    date: body.date,
+    assetType: body.assetType,
+    platforms: body.platforms,
+    caption: body.caption || '',
+    url: body.url || undefined,
+    approvers: body.approvers || [],
+    status,
+  }, 'created');
+
   return new Response(JSON.stringify({ id, createdAt, status }), { status: 201, headers });
 };
 
@@ -169,6 +286,13 @@ export const onRequestPut: PagesFunction = async ({ request, env }) => {
     body.id
   ).run();
 
+  if (contentChanged && existing.status === 'Approved') {
+    const refreshed = await db.prepare(`SELECT * FROM entries WHERE id = ?`).bind(body.id).first();
+    if (refreshed) {
+      await notifyApprovers(env, hydrateEntry(refreshed), 'reopened');
+    }
+  }
+
   return new Response(JSON.stringify({ id: body.id, status: nextStatus }), { status: 200, headers });
 };
 
@@ -184,4 +308,3 @@ export const onRequestDelete: PagesFunction = async ({ request, env }) => {
   await db.prepare(`UPDATE entries SET deletedAt = ? WHERE id = ?`).bind(deletedAt, id).run();
   return new Response(JSON.stringify({ id, deletedAt }), { status: 200, headers });
 };
-
