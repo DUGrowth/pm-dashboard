@@ -1,6 +1,3 @@
-// Cloudflare Pages Function: /api/entries
-// CRUD for entries backed by D1. All SQL strings are wrapped safely.
-
 type Platform =
   | 'Instagram'
   | 'Facebook'
