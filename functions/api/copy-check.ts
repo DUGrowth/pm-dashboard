@@ -169,3 +169,46 @@ new Response(JSON.stringify(data), {
 status,
 headers: { 'content-type': 'application/json' },
 });
+// Optional: lets OPTIONS preflight succeed (harmless)
+export const onRequestOptions = async () =>
+new Response(null, {
+status: 204,
+headers: {
+'access-control-allow-origin': '*',
+'access-control-allow-methods': 'POST, OPTIONS',
+'access-control-allow-headers': 'content-type',
+},
+});
+
+// Visiting in a browser (GET) returns helpful message instead of 405 HTML
+export const onRequestGet = async () => ok({ error: 'Use POST' }, 405);
+
+// POST handler — returns JSON so you can verify it works before wiring the full model call
+export const onRequestPost = async ({ request, env }: { request: Request; env: any }) => {
+const body = await request.json().catch(() => null);
+if (!body || typeof body.text !== 'string') {
+return ok({ error: 'Invalid JSON body' }, 400);
+}
+
+// If you haven’t set OPENAI_API_KEY yet, return a safe fallback (422) rather than 500
+if (!env.OPENAI_API_KEY) {
+const max = body.constraints?.maxChars || 280;
+return ok({
+score: { clarity: 0.7, brevity: 0.7, hook: 0.6, fit: 0.75, readingLevel: body.readingLevelTarget || 'Grade 8' },
+flags: [],
+suggestion: { text: String(body.text).slice(0, max) },
+variants: [],
+explanations: ['Fallback: OPENAI_API_KEY missing'],
+}, 422);
+}
+
+// Replace this stub with your full model call later. This just proves POST works.
+const max = body.constraints?.maxChars || 280;
+return ok({
+score: { clarity: 0.8, brevity: 0.8, hook: 0.7, fit: 0.8, readingLevel: body.readingLevelTarget || 'Grade 7' },
+flags: [],
+suggestion: { text: String(body.text).slice(0, max) },
+variants: [{ label: 'Shorter', text: 'A shorter variant goes here.' }],
+explanations: ['Stub: replace with OpenAI call.'],
+});
+};
