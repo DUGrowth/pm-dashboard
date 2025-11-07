@@ -46,6 +46,9 @@ type EntrySummary = {
 type NotificationReason = 'created' | 'reopened';
 
 const BREVO_ENDPOINT = 'https://api.brevo.com/v3/smtp/email';
+const FALLBACK_APPROVER_DIRECTORY = {
+  'Dan Davis': 'daniel.davis@populationmatters.org',
+};
 
 function parseJsonArray(value: any): any[] {
   if (!value) return [];
@@ -76,13 +79,15 @@ function hydrateEntry(row: any): EntrySummary {
 
 function loadApproverDirectory(env: any): Record<string, string> {
   const raw = env?.APPROVER_DIRECTORY;
-  if (!raw) return {};
+  if (!raw) return { ...FALLBACK_APPROVER_DIRECTORY };
   try {
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    return parsed && typeof parsed === 'object'
+      ? { ...FALLBACK_APPROVER_DIRECTORY, ...parsed }
+      : { ...FALLBACK_APPROVER_DIRECTORY };
   } catch {
     console.warn('APPROVER_DIRECTORY is not valid JSON');
-    return {};
+    return { ...FALLBACK_APPROVER_DIRECTORY };
   }
 }
 
