@@ -1,4 +1,4 @@
-// Notification proxy: supports Teams webhook plus email via MailChannels
+// Notification proxy: supports Teams webhook plus email via Brevo (primary) or MailChannels (fallback)
 
 import { authorizeRequest } from './_auth';
 
@@ -88,6 +88,43 @@ const resolveRecipients = (body: EmailPayload, env: any) => {
   return unique;
 };
 
+const sendViaBrevo = async ({
+  to,
+  subject,
+  text,
+  html,
+  env,
+}: {
+  to: string[];
+  subject: string;
+  text?: string;
+  html?: string;
+  env: any;
+}) => {
+  const apiKey = env.BREVO_API_KEY || env.BREVO_API_TOKEN;
+  if (!apiKey) return { ok: false, reason: 'missing_api_key' };
+  const senderEmail = env.BREVO_SENDER_EMAIL || env.MAIL_FROM || 'no-reply@example.com';
+  const senderName = env.BREVO_SENDER_NAME || env.MAIL_FROM_NAME || 'PM Dashboard';
+  const endpoint = env.BREVO_API_BASE || 'https://api.brevo.com/v3/smtp/email';
+  const payload: Record<string, any> = {
+    sender: { email: senderEmail, name: senderName },
+    to: to.map((email) => ({ email })),
+    subject,
+  };
+  if (html) payload.htmlContent = String(html);
+  if (text) payload.textContent = String(text);
+  if (!payload.htmlContent && !payload.textContent) payload.textContent = 'Notification';
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'api-key': apiKey,
+    },
+    body: JSON.stringify(payload),
+  });
+  return { ok: res.ok, status: res.status };
+};
+
 const sendViaMailChannels = async ({
   to,
   subject,
@@ -146,22 +183,33 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: a
     }
   }
 
-  // Email via MailChannels
+  // Email via Brevo (fallback to MailChannels)
   const recipients = resolveRecipients(b, env);
   if (recipients.length && (b.subject || b.text || b.html)) {
     const subject = String(b.subject || 'Notification');
     try {
-      const emailResult = await sendViaMailChannels({
-        to: recipients,
-        subject,
-        text: b.text,
-        html: b.html,
-        env,
-      });
-      results.email = emailResult.ok ? 'sent' : `http_${emailResult.status || emailResult.reason || 'error'}`;
+      let emailResult:
+        | { ok: boolean; status?: number | string; reason?: string }
+        | null = null;
+      if (env.BREVO_API_KEY || env.BREVO_API_TOKEN) {
+        emailResult = await sendViaBrevo({ to: recipients, subject, text: b.text, html: b.html, env });
+        if (!emailResult.ok && env.MAIL_FROM) {
+          // attempt fallback to MailChannels
+          emailResult = await sendViaMailChannels({ to: recipients, subject, text: b.text, html: b.html, env });
+        }
+      } else if (env.MAIL_FROM || env.MAIL_FROM_NAME) {
+        emailResult = await sendViaMailChannels({ to: recipients, subject, text: b.text, html: b.html, env });
+      }
+      if (emailResult) {
+        results.email = emailResult.ok ? 'sent' : `http_${emailResult.status || emailResult.reason || 'error'}`;
+      } else {
+        results.email = 'skipped_no_sender';
+      }
     } catch {
       results.email = 'error';
     }
+  } else if (!recipients.length) {
+    results.email = 'skipped_no_recipients';
   }
 
   return ok({ ok: true, results });

@@ -28,14 +28,11 @@ Environment
   - All `/api/*` routes expect Cloudflare Access headers. Optionally limit access to specific users via `ACCESS_ALLOWED_EMAILS` (comma-separated list).
   - For local development without Access, set `ALLOW_UNAUTHENTICATED=1` and optionally `DEV_AUTH_EMAIL` / `DEV_AUTH_NAME` for the synthetic user.
   - The Teams webhook proxy restricts outbound requests to `*.office.com` / `*.office365.com` hosts by default; extend/override the allow list with `TEAMS_WEBHOOK_ALLOW_LIST` if needed.
-- Notifications (MailChannels):
-  - Configure `MAIL_FROM` / `MAIL_FROM_NAME` for the sender identity. Use a domain you control and add `include:mailchannels.net` to its SPF record so recipients trust the messages.
-  - Optional `MAIL_TO` defines fallback recipients (comma-separated).
-  - `APPROVER_DIRECTORY` should be a JSON object mapping display names to email addresses (e.g., `{"Dan Davis":"dan@example.org"}`). Notify requests can pass approver names (`approvers`) and/or explicit `to` values (names or emails) and the worker resolves them through this directory.
- - For `notify` (emails via MailChannels):
-   - `MAIL_FROM` (e.g., `noreply@yourdomain.com`), `MAIL_FROM_NAME` (e.g., `PM Dashboard`)
-   - `MAIL_TO` optional default recipient list (comma-separated)
-   - Recipients may be provided per-request (body.to) and/or via `MAIL_TO`.
+- Notifications:
+  - **Brevo (primary):** set `BREVO_API_KEY` (or `BREVO_API_TOKEN`), `BREVO_SENDER_EMAIL`, and `BREVO_SENDER_NAME`. Authenticate your domain inside Brevo (SPF + DKIM) or use a Brevo-managed sender.
+  - **MailChannels fallback:** optionally set `MAIL_FROM` / `MAIL_FROM_NAME` (must have `include:mailchannels.net` in the domain’s SPF). If Brevo isn’t available, the worker automatically posts through MailChannels.
+  - `MAIL_TO` provides optional default recipients (comma-separated).
+  - `APPROVER_DIRECTORY` is a JSON object mapping display names to email addresses (e.g., `{"Dan Davis":"dan@example.org"}`). Requests can pass approver names (`approvers`) and/or explicit `to` values (names or emails); the worker resolves them using this directory (plus `MAIL_TO`) before sending.
 
 Local Development
 1) Serve `index.html` with any static server (or Cloudflare Pages dev).
