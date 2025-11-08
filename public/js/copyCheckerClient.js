@@ -35,3 +35,13 @@ export async function runCopyCheck(params) {
   }
   return requestCopyCheck(params);
 }
+
+// Optionally expose a safe global for non-module scripts
+try {
+  if (typeof window !== 'undefined') {
+    window.copyChecker = Object.freeze({
+      ...(window.copyChecker || {}),
+      runCopyCheck,
+    });
+  }
+} catch {/* noop */}

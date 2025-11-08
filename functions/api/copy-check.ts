@@ -1,82 +1,36 @@
-/*
-  Cloudflare Pages Function: POST /api/copy-check
-  - Validates input
-  - Calls OpenAI (if OPENAI_API_KEY set)
-  - Parses/repairs output or falls back to a safe, rule-based suggestion
-  - Always returns JSON; uses 200 even on fallback to keep clients simple
-*/
+import { authorizeRequest } from './_auth';
 
-type Platform =
-  | 'Instagram'
-  | 'Facebook'
-  | 'LinkedIn'
-  | 'X/Twitter'
-  | 'TikTok'
-  | 'YouTube'
-  | 'Threads'
-  | 'Pinterest';
+// Cloudflare Pages Function: /api/copy-check
+// Validates input, calls OpenAI (configurable), and enforces constraints on output
 
-type AssetType = 'Video' | 'Design' | 'Carousel';
-
-type Tone = { confident: number; compassionate: number; evidenceLed: number };
-
-type Constraints = { maxChars: number; maxHashtags?: number; requireCTA?: boolean };
-
-type Brand = { bannedWords: string[]; requiredPhrases: string[]; tone: Tone };
-
-type InputPayload = {
-  text: string;
-  platform: Platform;
-  assetType: AssetType;
-  readingLevelTarget?: string;
-  constraints: Constraints;
-  brand: Brand;
-};
-
-type OutputShape = {
-  score: { clarity: number; brevity: number; hook: number; fit: number; readingLevel: string };
-  flags: string[];
-  suggestion: { text: string };
-  variants: { label: string; text: string }[];
-  explanations: string[];
-};
-
-// --------- CORS helpers ---------
-function corsHeaders(origin?: string | null) {
-  return {
-    'access-control-allow-origin': origin || '*',
-    'access-control-allow-methods': 'POST, OPTIONS, GET',
-    'access-control-allow-headers': 'authorization, content-type',
-    'access-control-allow-credentials': 'true',
-    'content-type': 'application/json; charset=utf-8',
-    'cache-control': 'no-store',
-  } as Record<string, string>;
-}
-
-export const onRequestOptions: PagesFunction = async ({ request }) => {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      ...corsHeaders(request.headers.get('origin')),
-    },
+// JSON response helper
+const ok = (data: unknown, status = 200) =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { 'content-type': 'application/json' },
   });
-};
 
-export const onRequestGet: PagesFunction = async ({ request }) => {
-  return new Response(JSON.stringify({ ok: true, use: 'POST /api/copy-check' }), {
-    status: 200,
-    headers: corsHeaders(request.headers.get('origin')),
-  });
-};
+// Allowed enums
+const PLATFORMS = new Set([
+  'Instagram',
+  'LinkedIn',
+  'X/Twitter',
+  'Facebook',
+  'TikTok',
+  'YouTube',
+  'Threads',
+  'Pinterest',
+]);
+const ASSET_TYPES = new Set(['Video', 'Design', 'Carousel']);
 
-// --------- Tiny in-memory rate limit (per-IP, 20/min) ---------
-const RL: Map<string, { tokens: number; ts: number }> = new Map();
-function rateLimit(ip: string, limit = 20, windowMs = 60_000) {
+// Simple token-bucket RL per IP
+const RL = new Map<string, { tokens: number; ts: number }>();
+function rateLimit(ip: string, limit = 20, interval = 60_000) {
   const now = Date.now();
   const b = RL.get(ip) || { tokens: limit, ts: now };
-  const elapsed = now - b.ts;
-  if (elapsed > windowMs) {
-    b.tokens = limit;
+  const refill = Math.floor(((now - b.ts) / interval) * limit);
+  if (refill > 0) {
+    b.tokens = Math.min(limit, b.tokens + refill);
     b.ts = now;
   }
   if (b.tokens <= 0) {
@@ -88,346 +42,219 @@ function rateLimit(ip: string, limit = 20, windowMs = 60_000) {
   return true;
 }
 
-// --------- Utils ---------
-const ALLOWED_PLATFORMS: Platform[] = [
-  'Instagram',
-  'Facebook',
-  'LinkedIn',
-  'X/Twitter',
-  'TikTok',
-  'YouTube',
-  'Threads',
-  'Pinterest',
-];
-const ALLOWED_ASSETS: AssetType[] = ['Video', 'Design', 'Carousel'];
+const getIP = (req: Request) =>
+  (req.headers.get('cf-connecting-ip') || req.headers.get('x-forwarded-for') || 'anon').toString();
 
-function escapeRegExp(s: string) {
-  // Standard safe escape for building dynamic RegExp from text
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-function getClientIp(req: Request) {
-  return (
-    req.headers.get('cf-connecting-ip') ||
-    req.headers.get('x-forwarded-for') ||
-    '0.0.0.0'
-  );
-}
-
-// URL detector: http(s)://... or www...., stops at whitespace or ')'
-const URL_RE = /(https?:\/\/[^\s)]+)|(www\.[^\s)]+)/gi;
-
-function extractUrls(s: string) {
+function maskUrls(text: string) {
   const urls: string[] = [];
-  const text = s.replace(URL_RE, (m) => {
-    const idx = urls.push(m) - 1;
-    return `__URL${idx}__`;
+  const masked = (text || '').replace(/https?:\/\/\S+/gi, (m) => {
+    const t = `__URL_${urls.length}__`;
+    urls.push(m);
+    return t;
   });
-  return { text, urls };
+  return { masked, urls };
 }
-
-function reinstateUrls(s: string, urls: string[]) {
-  return s.replace(/__URL(\d+)__/g, (_: string, n: string) => urls[Number(n)] ?? '');
+function restoreUrls(text: string, urls: string[]) {
+  let out = text;
+  urls.forEach((u, i) => {
+    const token = `__URL_${i}__`;
+    out = out.replaceAll(token, u);
+  });
+  return out;
 }
-
-function limitHashtags(s: string, max?: number) {
-  if (!max || max < 0) return s;
-  const parts = s.split(/(\s+)/); // keep spaces
-  let count = 0;
-  for (let i = 0; i < parts.length; i++) {
-    const p = parts[i];
-    if (/^#[A-Za-z0-9_]+$/.test(p)) {
-      count += 1;
-      if (count > max) parts[i] = '';
-    }
+function enforceHashtags(text: string, max?: number) {
+  if (!max || max <= 0) return text;
+  const tokens = text.split(/(\s+)/);
+  let seen = 0;
+  return tokens
+    .map((t) => {
+      if (/^#\w+/.test(t)) {
+        if (seen < max) {
+          seen += 1;
+          return t;
+        }
+        return t.replace('#', '');
+      }
+      return t;
+    })
+    .join('');
+}
+function ensureRequired(text: string, phrases: string[]) {
+  let out = text;
+  for (const p of phrases || []) {
+    if (!p) continue;
+    if (!new RegExp(escapeRegExp(p), 'i').test(out)) out = `${out} ${p}`.trim();
   }
-  return parts.join('');
+  return out;
 }
-
-function hardTrimTo(s: string, max: number, preserveUrls = true) {
-  if (s.length <= max) return s;
-  if (!preserveUrls) return s.slice(0, max);
-  // Try not to cut through a URL
-  const urls = Array.from(s.matchAll(URL_RE)).map((m) => ({ start: m.index || 0, end: (m.index || 0) + m[0].length }));
-  let end = max;
-  // If end falls inside any URL, move end back to start of that URL
+function removeBanned(text: string, words: string[]) {
+  let out = text;
+  for (const w of words || []) {
+    if (!w) continue;
+    const re = new RegExp(`\\b${escapeRegExp(w)}\\b`, 'gi');
+    out = out.replace(re, '').replace(/\s{2,}/g, ' ');
+  }
+  return out.trim();
+}
+function trimTo(text: string, limit: number, urls: string[]) {
+  if (text.length <= limit) return text;
+  let t = text.slice(0, limit);
+  const lastSpace = t.lastIndexOf(' ');
+  if (lastSpace > limit - 20) t = t.slice(0, lastSpace);
+  // try to preserve at least one URL if present
   for (const u of urls) {
-    if (end > u.start && end < u.end) {
-      end = u.start;
-      break;
-    }
+    if (!t.includes(u)) t = `${t.trim()} ${u}`.trim();
   }
-  return s.slice(0, Math.max(0, end));
+  if (t.length > limit) t = `${t.slice(0, limit - 1)}…`;
+  return t;
 }
 
-function normalizeSpaces(s: string) {
-  return s.replace(/\s+/g, ' ').trim();
+function postValidate(result: any, input: any) {
+  const c = input.constraints || {};
+  const brand = input.brand || {};
+  const base = result?.suggestion?.text || input.text || '';
+  const { masked, urls } = maskUrls(base);
+  let work = masked;
+  work = removeBanned(work, brand.bannedWords || []);
+  work = ensureRequired(work, brand.requiredPhrases || []);
+  work = enforceHashtags(work, c.maxHashtags);
+  work = restoreUrls(work, urls);
+  work = trimTo(work, c.maxChars || 280, urls);
+  const suggestion = { text: work };
+  const score =
+    result?.score || {
+      clarity: 0.7,
+      brevity: 0.7,
+      hook: 0.6,
+      fit: 0.75,
+      readingLevel: input.readingLevelTarget || 'Grade 8',
+    };
+  const flags = Array.isArray(result?.flags) ? result.flags : [];
+  const variants = Array.isArray(result?.variants)
+    ? result.variants.slice(0, 3).map((v: any, i: number) => {
+        const variantSource = typeof v?.text === 'string' && v.text.trim() ? v.text : input.text;
+        const { masked: variantMasked, urls: variantUrls } = maskUrls(variantSource || '');
+        const normalized = trimTo(
+          restoreUrls(
+            removeBanned(ensureRequired(variantMasked, brand.requiredPhrases || []), brand.bannedWords || []),
+            variantUrls,
+          ),
+          c.maxChars || 280,
+          variantUrls,
+        );
+        return {
+          label: v?.label || `Variant ${i + 1}`,
+          text: normalized,
+        };
+      })
+    : [];
+  const explanations = Array.isArray(result?.explanations)
+    ? result.explanations
+    : ['Copy adjusted for constraints'];
+  return { score, flags, suggestion, variants, explanations };
 }
 
-function validateInput(body: any): { ok: true; data: InputPayload } | { ok: false; error: string } {
-  if (!body || typeof body !== 'object') return { ok: false, error: 'Invalid JSON body' };
-  const { text, platform, assetType, readingLevelTarget, constraints, brand } = body;
-  if (typeof text !== 'string' || !text.trim()) return { ok: false, error: 'text required' };
-  if (!ALLOWED_PLATFORMS.includes(platform)) return { ok: false, error: 'invalid platform' };
-  if (!ALLOWED_ASSETS.includes(assetType)) return { ok: false, error: 'invalid assetType' };
-  if (!constraints || typeof constraints.maxChars !== 'number') return { ok: false, error: 'constraints.maxChars required' };
-  if (!brand || !Array.isArray(brand.bannedWords) || !Array.isArray(brand.requiredPhrases)) return { ok: false, error: 'brand.bannedWords and brand.requiredPhrases required' };
-  const tone = brand.tone || { confident: 0.8, compassionate: 0.7, evidenceLed: 1 };
-  const data: InputPayload = {
-    text: String(text),
-    platform,
-    assetType,
-    readingLevelTarget: readingLevelTarget || 'Grade 7',
-    constraints: {
-      maxChars: Number(constraints.maxChars),
-      maxHashtags: constraints.maxHashtags ? Number(constraints.maxHashtags) : undefined,
-      requireCTA: Boolean(constraints.requireCTA),
-    },
-    brand: {
-      bannedWords: brand.bannedWords.map((x: any) => String(x)),
-      requiredPhrases: brand.requiredPhrases.map((x: any) => String(x)),
-      tone: {
-        confident: Number(tone.confident ?? 0.8),
-        compassionate: Number(tone.compassionate ?? 0.7),
-        evidenceLed: Number(tone.evidenceLed ?? 1),
-      },
-    },
-  };
-  return { ok: true, data };
-}
-
-function ruleBasedTransform(input: InputPayload): { text: string; flags: string[] } {
-  const { constraints, brand } = input;
-  const flags: string[] = [];
-  const { text: noUrl, urls } = extractUrls(input.text);
-
-  // Remove banned words (whole word, case-insensitive)
-  let t = noUrl;
-  for (const bw of brand.bannedWords) {
-    if (!bw) continue;
-    const re = new RegExp(`\\b${escapeRegExp(bw)}\\b`, 'gi');
-    if (re.test(t)) flags.push(`Removed banned word: "${bw}"`);
-    t = t.replace(re, '');
-  }
-  t = normalizeSpaces(t);
-
-  // Inject required phrases if missing
-  for (const req of brand.requiredPhrases) {
-    if (!req) continue;
-    const present = new RegExp(escapeRegExp(req), 'i').test(t);
-    if (!present) {
-      const addition = (t ? ' — ' : '') + req;
-      t += addition;
-      flags.push(`Injected required phrase: "${req}"`);
-    }
+export const onRequestPost = async ({ request, env }: { request: Request; env: any }) => {
+  const auth = authorizeRequest(request, env);
+  if (!auth.ok) return ok({ error: auth.error }, auth.status);
+  if (!rateLimit(getIP(request))) return ok({ error: 'Rate limit exceeded' }, 429);
+  const b = await request.json().catch(() => null);
+  if (!b || typeof b.text !== 'string') return ok({ error: 'Invalid JSON body' }, 400);
+  if (!PLATFORMS.has(b.platform)) return ok({ error: 'Invalid platform' }, 400);
+  if (!ASSET_TYPES.has(b.assetType)) return ok({ error: 'Invalid assetType' }, 400);
+  const constraints = b.constraints || {};
+  if (!(constraints && typeof constraints.maxChars === 'number' && constraints.maxChars > 0)) {
+    return ok({ error: 'constraints.maxChars required' }, 400);
   }
 
-  // Re-insert URLs exactly
-  t = reinstateUrls(t, urls);
+  const OPENAI_MODEL = env.OPENAI_MODEL || 'gpt-4o-mini';
+  const OPENAI_API_BASE = env.OPENAI_API_BASE || 'https://api.openai.com/v1';
 
-  // Cap hashtags
-  t = limitHashtags(t, constraints.maxHashtags);
-
-  // Trim to max chars, preserve URLs where possible
-  if (t.length > constraints.maxChars) {
-    t = hardTrimTo(t, constraints.maxChars, true);
-    flags.push('Trimmed to maxChars');
+  if (!env.OPENAI_API_KEY) {
+    // Fallback if key is missing
+    const fb = postValidate(null, b);
+    return ok(fb, 422);
   }
 
-  // If CTA required but none detected (simple heuristic)
-  if (constraints.requireCTA) {
-    const hasCTA = /\b(join|sign up|donate|learn more|read more|take action|share)\b/i.test(t);
-    if (!hasCTA) flags.push('Missing CTA');
-  }
-
-  return { text: t, flags };
-}
-
-function buildSystemPrompt() {
-  return (
+  const SYSTEM_PROMPT =
     'You are a senior copy editor for a social impact organization. Optimize for clarity, brevity, action, and platform fit.\n' +
     'Respect HARD CONSTRAINTS: do not exceed character limits; do not change URLs; include REQUIRED PHRASES; remove BANNED WORDS.\n' +
     'Preserve meaning and factual content. Return ONLY strict JSON with keys: score, flags, suggestion, variants, explanations. No extra text or markdown.\n' +
-    'If constraints are impossible, produce the closest valid text and list violations in flags.'
-  );
-}
+    'If constraints are impossible, produce the closest valid text and list violations in flags.';
 
-function buildUserPrompt(input: InputPayload) {
-  const schema = {
-    type: 'object',
-    properties: {
-      score: {
-        type: 'object',
-        properties: {
-          clarity: { type: 'number' },
-          brevity: { type: 'number' },
-          hook: { type: 'number' },
-          fit: { type: 'number' },
-          readingLevel: { type: 'string' },
-        },
-        required: ['clarity', 'brevity', 'hook', 'fit', 'readingLevel'],
-      },
-      flags: { type: 'array', items: { type: 'string' } },
-      suggestion: {
-        type: 'object',
-        properties: { text: { type: 'string' } },
-        required: ['text'],
-      },
-      variants: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: { label: { type: 'string' }, text: { type: 'string' } },
-          required: ['label', 'text'],
-        },
-      },
-      explanations: { type: 'array', items: { type: 'string' } },
+  const schema = JSON.stringify({
+    score: {
+      clarity: 'number',
+      brevity: 'number',
+      hook: 'number',
+      fit: 'number',
+      readingLevel: 'string',
     },
-    required: ['score', 'flags', 'suggestion', 'variants', 'explanations'],
-    additionalProperties: false,
-  };
-
-  return (
-    'INPUT JSON:\n' +
-    JSON.stringify(input) +
-    '\nOUTPUT SCHEMA (JSON):\n' +
-    JSON.stringify(schema)
-  );
-}
-
-function coerceOutput(parsed: any): OutputShape | null {
-  try {
-    if (!parsed || typeof parsed !== 'object') return null;
-    const score = parsed.score || {};
-    const out: OutputShape = {
-      score: {
-        clarity: Number(score.clarity ?? 0),
-        brevity: Number(score.brevity ?? 0),
-        hook: Number(score.hook ?? 0),
-        fit: Number(score.fit ?? 0),
-        readingLevel: String(score.readingLevel ?? 'Unknown'),
-      },
-      flags: Array.isArray(parsed.flags) ? parsed.flags.map((x: any) => String(x)) : [],
-      suggestion: { text: String(parsed.suggestion?.text ?? '') },
-      variants: Array.isArray(parsed.variants)
-        ? parsed.variants.map((v: any) => ({ label: String(v.label ?? ''), text: String(v.text ?? '') }))
-        : [],
-      explanations: Array.isArray(parsed.explanations) ? parsed.explanations.map((x: any) => String(x)) : [],
-    };
-    if (!out.suggestion.text) return null;
-    return out;
-  } catch {
-    return null;
-  }
-}
-
-function postValidate(out: OutputShape, input: InputPayload): OutputShape {
-  // Enforce constraints on suggestion and variants (trim, banned words removal, ensure required phrases)
-  const fix = (s: string) => ruleBasedTransform({ ...input, text: s }).text;
-  const flags: string[] = [...out.flags];
-  const fixedSuggestion = fix(out.suggestion.text);
-  if (fixedSuggestion !== out.suggestion.text) flags.push('Adjusted to meet constraints');
-  const fixedVariants = out.variants.map((v) => {
-    const newText = fix(v.text);
-    if (newText !== v.text) flags.push(`Adjusted variant (${v.label}) to meet constraints`);
-    return { ...v, text: newText };
+    flags: ['string'],
+    suggestion: { text: 'string' },
+    variants: [{ label: 'string', text: 'string' }],
+    explanations: ['string'],
   });
-  return { ...out, flags: Array.from(new Set(flags)), suggestion: { text: fixedSuggestion }, variants: fixedVariants };
-}
 
-async function callOpenAI(env: any, input: InputPayload): Promise<OutputShape | null> {
-  const apiKey = env?.OPENAI_API_KEY as string | undefined;
-  if (!apiKey) return null;
+  const prompt = `Input JSON: ${JSON.stringify(b)}\nOutput Schema: ${schema}`;
 
-  const system = buildSystemPrompt();
-  const user = buildUserPrompt(input);
-
-  async function once(temp: number, extra?: string) {
-    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+  let raw = '';
+  try {
+    const r = await fetch(`${OPENAI_API_BASE}/chat/completions`, {
       method: 'POST',
       headers: {
-        authorization: `Bearer ${apiKey}`,
+        authorization: `Bearer ${env.OPENAI_API_KEY}`,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-5-codex-high',
-        temperature: temp,
+        model: OPENAI_MODEL,
+        temperature: 0.3,
         messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: extra ? `${user}\n\nReturn ONLY strict JSON. ${extra}` : user },
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: prompt },
         ],
       }),
     });
-    if (!r.ok) return null;
+    if (!r.ok) throw new Error('LLM_HTTP');
     const j: any = await r.json();
-    const raw = j?.choices?.[0]?.message?.content ?? '';
+    raw = j?.choices?.[0]?.message?.content ?? '';
+  } catch {
+    const fb = postValidate(null, b);
+    return ok(fb, 502);
+  }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse((raw || '').trim());
+  } catch {
+    // Retry once with stricter instruction
     try {
-      const parsed = JSON.parse(raw);
-      return coerceOutput(parsed);
+      const r2 = await fetch(`${OPENAI_API_BASE}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${env.OPENAI_API_KEY}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: OPENAI_MODEL,
+          temperature: 0.25,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: `${prompt}\nReturn ONLY strict JSON matching the schema.` },
+          ],
+        }),
+      });
+      if (!r2.ok) throw new Error('LLM_HTTP');
+      const j2: any = await r2.json();
+      parsed = JSON.parse((j2?.choices?.[0]?.message?.content || '').trim());
     } catch {
-      return null;
+      const fb = postValidate(null, b);
+      return ok(fb, 422);
     }
   }
 
-  // Primary attempt
-  let out = await once(0.3);
-  if (out) return out;
-  // Retry with stricter instruction
-  out = await once(0.3, 'No prose, no markdown.');
-  return out;
-}
-
-function makeFallback(input: InputPayload): OutputShape {
-  const { text, flags } = ruleBasedTransform(input);
-  return {
-    score: { clarity: 0.7, brevity: 0.7, hook: 0.6, fit: 0.8, readingLevel: input.readingLevelTarget || 'Grade 7' },
-    flags: Array.from(new Set(['Rule-based fallback', ...flags])),
-    suggestion: { text },
-    variants: [
-      { label: 'Shorter', text: hardTrimTo(text, Math.max(40, Math.min(120, input.constraints.maxChars)), true) },
-    ],
-    explanations: [
-      'Removed banned words and preserved URLs',
-      'Injected required phrases and trimmed to character limit',
-      'Heuristic reading-level balance applied',
-    ],
-  };
-}
-
-export const onRequestPost: PagesFunction = async ({ request, env }) => {
-  const origin = request.headers.get('origin');
-  const headers = corsHeaders(origin);
-
-  // Rate limit
-  const ip = getClientIp(request);
-  if (!rateLimit(ip)) {
-    return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429, headers });
-  }
-
-  // Parse & validate
-  let body: any;
-  try {
-    body = await request.json();
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), { status: 400, headers });
-  }
-  const v = validateInput(body);
-  if (!('ok' in v) || !v.ok) {
-    return new Response(JSON.stringify({ error: v.error }), { status: 400, headers });
-  }
-  const input = v.data;
-
-  // Try OpenAI → post-validate → return; else fallback
-  try {
-    const ai = await callOpenAI(env, input);
-    if (ai) {
-      const safe = postValidate(ai, input);
-      return new Response(JSON.stringify(safe), { status: 200, headers });
-    }
-  } catch {
-    // ignore → fallback below
-  }
-
-  const fb = makeFallback(input);
-  return new Response(JSON.stringify(fb), { status: 200, headers });
+  const safe = postValidate(parsed, b);
+  return ok(safe);
 };

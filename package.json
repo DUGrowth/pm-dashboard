@@ -1,0 +1,22 @@
+{
+  "name": "pm-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "lint": "eslint \"{functions,public,tools}/**/*.{js,jsx,ts,tsx,mjs}\" --max-warnings=0",
+    "format": "prettier -w \"**/*.{js,jsx,ts,tsx,mjs,css,html,json,md}\"",
+    "typecheck": "tsc --noEmit",
+    "test:copy-check": "node tools/test-copy-check.mjs"
+  },
+  "devDependencies": {
+    "eslint": "^9.11.0",
+    "@typescript-eslint/eslint-plugin": "^8.2.0",
+    "@typescript-eslint/parser": "^8.2.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react": "^7.34.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.0"
+  }
+}
+

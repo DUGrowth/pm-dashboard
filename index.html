@@ -131,6 +131,9 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script type="text/babel" data-presets="env,react" src="/public/js/components/Badge.jsx"></script>
+    <script type="text/babel" data-presets="env,react" src="/public/js/components/NotificationBell.jsx"></script>
+    <script type="text/babel" data-presets="env,react" src="/public/js/components/copyCheckSection.jsx"></script>
 
     <script type="text/babel" data-presets="env,react">
       const { useState, useMemo, useEffect } = React;
@@ -941,7 +944,7 @@
         }
       };
 
-      // Simple audit trail (global list). Attach to entries later when central storage arrives.
+      // Simple audit trail (global list). Writes to server if available; also keeps a local ring buffer.
       const AUDIT_STORAGE_KEY = "pm-content-audit-log";
       const appendAudit = (event) => {
         if (!storageAvailable) return;
@@ -958,6 +961,9 @@
           };
           list.unshift(entry);
           window.localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(list.slice(0, 500)));
+          if (window.api && window.api.enabled) {
+            try { window.api.logAudit(entry).catch(() => {}); } catch {}
+          }
         } catch (e) {
           console.warn("Failed to append audit", e);
         }
@@ -1390,7 +1396,7 @@
         </div>
       );
 
-  const Badge = ({ variant = "default", className = "", children }) => {
+  const BadgeInline = ({ variant = "default", className = "", children }) => {
     const styles = {
       default: "bg-aqua-100 text-ocean-700",
       secondary: "bg-graystone-100 text-graystone-700",
@@ -1403,7 +1409,9 @@
     );
   };
 
-  function CopyCheckSection({ caption, platformCaptions, platforms, assetType, guidelines, currentUser, onApply }) {
+  const Badge = window.Badge || BadgeInline;
+
+  function CopyCheckSectionInline({ caption, platformCaptions, platforms, assetType, guidelines, currentUser, onApply }) {
     const [open, setOpen] = React.useState(false);
     const [loading, setLoading] = React.useState(false);
     const [error, setError] = React.useState('');
@@ -1433,16 +1441,21 @@
               tone: { confident: 0.8, compassionate: 0.7, evidenceLed: 1.0 },
             },
           };
-          const res = await fetch('/api/copy-check', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          if (!res.ok) {
-            const j = await res.json().catch(() => ({}));
-            throw new Error(j?.error || `HTTP ${res.status}`);
+          let json;
+          if (window.copyChecker && typeof window.copyChecker.runCopyCheck === 'function') {
+            json = await window.copyChecker.runCopyCheck(payload);
+          } else {
+            const res = await fetch('/api/copy-check', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            if (!res.ok) {
+              const j = await res.json().catch(() => ({}));
+              throw new Error(j?.error || `HTTP ${res.status}`);
+            }
+            json = await res.json();
           }
-          const json = await res.json();
           next[platform] = json;
         }
         setResults(next);
@@ -1529,7 +1542,9 @@
     );
   }
 
-  const NotificationBell = ({ notifications, unreadCount, onOpenItem }) => {
+  const CopyCheckSection = window.CopyCheckSection || CopyCheckSectionInline;
+
+  const NotificationBellInline = ({ notifications, unreadCount, onOpenItem }) => {
     const [open, setOpen] = useState(false);
     const topItems = (notifications || []).slice(0, 8);
 
@@ -1596,6 +1611,8 @@
       </div>
     );
   };
+
+  const NotificationBell = window.NotificationBell || NotificationBellInline;
 
       const Button = ({
         type = "button",
@@ -2221,14 +2238,13 @@
                       action: 'copy-check-apply',
                       meta: { scope: 'form', platform, assetType },
                     });
-                    if (activeGuidelines?.teamsWebhookUrl) {
-                      try {
-                        fetch(activeGuidelines.teamsWebhookUrl, {
-                          method: 'POST',
-                          headers: { 'content-type': 'application/json' },
-                          body: JSON.stringify({ text: `Copy check applied (${platform}) by ${currentUser}` }),
-                        });
-                      } catch {}
+                    if (window.api && window.api.enabled && activeGuidelines?.teamsWebhookUrl) {
+                      window.api
+                        .notify({
+                          teamsWebhookUrl: activeGuidelines.teamsWebhookUrl,
+                          message: `Copy check applied (${platform}) by ${currentUser}`,
+                        })
+                        .catch(() => {});
                     }
                   }}
                 />
@@ -5331,6 +5347,7 @@
         const [ideas, setIdeas] = useState(() => loadIdeas());
         const [linkedinSubmissions, setLinkedinSubmissions] = useState(() => loadLinkedInSubmissions());
         const [testingFrameworks, setTestingFrameworks] = useState(() => loadTestingFrameworks());
+        const [adminAudits, setAdminAudits] = useState([]);
         const [selectedFrameworkId, setSelectedFrameworkId] = useState("");
         const [currentUser, setCurrentUser] = useState(() =>
           storageAvailable ? window.localStorage.getItem(USER_STORAGE_KEY) : null
@@ -5367,6 +5384,47 @@
           setTestingFrameworks(loadTestingFrameworks());
         }, []);
 
+        // If server is available, hydrate from API once on load (override local); fall back to local on failure
+        useEffect(() => {
+          (async () => {
+            try {
+              if (window.api && window.api.enabled) {
+                const [serverEntries, serverIdeas, serverLinkedIn, serverFrameworks] = await Promise.all([
+                  window.api.listEntries().catch(() => []),
+                  window.api.listIdeas().catch(() => []),
+                  window.api.listLinkedIn().catch(() => []),
+                  window.api.listTestingFrameworks().catch(() => []),
+                ]);
+                if (Array.isArray(serverEntries)) setEntries(serverEntries);
+                if (Array.isArray(serverIdeas)) setIdeas(serverIdeas);
+                if (Array.isArray(serverLinkedIn)) setLinkedinSubmissions(serverLinkedIn);
+                if (Array.isArray(serverFrameworks)) setTestingFrameworks(serverFrameworks);
+              }
+            } catch {}
+          })();
+        }, []);
+
+        // Also hydrate when the api client announces readiness
+        useEffect(() => {
+          const onReady = (e) => {
+            if (e?.detail?.enabled) {
+              Promise.all([
+                window.api.listEntries().catch(() => []),
+                window.api.listIdeas().catch(() => []),
+                window.api.listLinkedIn().catch(() => []),
+                window.api.listTestingFrameworks().catch(() => []),
+              ]).then(([serverEntries, serverIdeas, serverLinkedIn, serverFrameworks]) => {
+                if (Array.isArray(serverEntries)) setEntries(serverEntries);
+                if (Array.isArray(serverIdeas)) setIdeas(serverIdeas);
+                if (Array.isArray(serverLinkedIn)) setLinkedinSubmissions(serverLinkedIn);
+                if (Array.isArray(serverFrameworks)) setTestingFrameworks(serverFrameworks);
+              }).catch(() => {});
+            }
+          };
+          window.addEventListener('pm-api-ready', onReady);
+          return () => window.removeEventListener('pm-api-ready', onReady);
+        }, []);
+
         useEffect(() => {
           setMenuMotionActive(true);
         }, []);
@@ -5399,7 +5457,9 @@
         };
 
         useEffect(() => {
-          saveEntries(entries);
+          if (!(window.api && window.api.enabled)) {
+            saveEntries(entries);
+          }
         }, [entries]);
 
         useEffect(() => {
@@ -5529,10 +5589,28 @@
             createdAt: timestamp,
           });
           setIdeas((prev) => [sanitized, ...prev]);
+          if (window.api && window.api.enabled) {
+            try {
+              window.api
+                .createIdea(sanitized)
+                .then(() => window.api.listIdeas().then(setIdeas).catch(() => {}))
+                .catch(() => {});
+            } catch {}
+          }
+          appendAudit({ user: currentUser, action: 'idea-create', meta: { id: sanitized.id, title: sanitized.title } });
         };
 
         const deleteIdea = (id) => {
           setIdeas((prev) => prev.filter((idea) => idea.id !== id));
+          if (window.api && window.api.enabled) {
+            try {
+              window.api
+                .deleteIdea(id)
+                .then(() => window.api.listIdeas().then(setIdeas).catch(() => {}))
+                .catch(() => {});
+            } catch {}
+          }
+          appendAudit({ user: currentUser, action: 'idea-delete', meta: { id } });
         };
 
         const addLinkedInSubmission = (payload) => {
@@ -5543,6 +5621,20 @@
             submitter: payload.submitter || currentUser || "Unknown",
           });
           setLinkedinSubmissions((prev) => [sanitized, ...prev]);
+          if (window.api && window.api.enabled) {
+            try {
+              window.api
+                .createLinkedIn(sanitized)
+                .then(() => window.api.listLinkedIn().then(setLinkedinSubmissions).catch(() => {}))
+                .catch(() => {});
+            } catch {}
+          }
+          appendAudit({ user: currentUser, action: 'linkedin-create', meta: { id: sanitized.id, title: sanitized.title } });
+          if (window.api && window.api.enabled && guidelines?.teamsWebhookUrl) {
+            window.api
+              .notify({ teamsWebhookUrl: guidelines.teamsWebhookUrl, message: `LinkedIn submission created by ${sanitized.submitter}: ${sanitized.title}` })
+              .catch(() => {});
+          }
         };
 
         const updateLinkedInStatus = (id, status) => {
@@ -5559,6 +5651,20 @@
                 : item
             )
           );
+          if (window.api && window.api.enabled) {
+            try {
+              window.api
+                .updateLinkedIn(id, { status, updatedAt: timestamp })
+                .then(() => window.api.listLinkedIn().then(setLinkedinSubmissions).catch(() => {}))
+                .catch(() => {});
+            } catch {}
+          }
+          appendAudit({ user: currentUser, action: 'linkedin-status', meta: { id, status } });
+          if (window.api && window.api.enabled && guidelines?.teamsWebhookUrl && (status === 'Approved' || status === 'Shared')) {
+            window.api
+              .notify({ teamsWebhookUrl: guidelines.teamsWebhookUrl, message: `LinkedIn submission ${status.toLowerCase()}: ${id}` })
+              .catch(() => {});
+          }
         };
 
         const addTestingFrameworkEntry = (framework) => {
@@ -5570,6 +5676,15 @@
           if (!sanitized) return;
           setTestingFrameworks((prev) => [sanitized, ...prev]);
           setSelectedFrameworkId(sanitized.id);
+          if (window.api && window.api.enabled) {
+            try {
+              window.api
+                .createTestingFramework(sanitized)
+                .then(() => window.api.listTestingFrameworks().then(setTestingFrameworks).catch(() => {}))
+                .catch(() => {});
+            } catch {}
+          }
+          appendAudit({ user: currentUser, action: 'framework-create', meta: { id: sanitized.id, name: sanitized.name } });
         };
 
         const deleteTestingFramework = (id) => {
@@ -5592,6 +5707,15 @@
               };
             })
           );
+          if (window.api && window.api.enabled) {
+            try {
+              window.api
+                .deleteTestingFramework(id)
+                .then(() => window.api.listTestingFrameworks().then(setTestingFrameworks).catch(() => {}))
+                .catch(() => {});
+            } catch {}
+          }
+          appendAudit({ user: currentUser, action: 'framework-delete', meta: { id } });
         };
 
         const importPerformanceDataset = (dataset) => {
@@ -5894,6 +6018,38 @@
           });
           if (createdEntry) {
             addNotifications(buildApprovalNotifications(createdEntry));
+            if (window.api && window.api.enabled) {
+              try {
+                const payload = {
+                  id: createdEntry.id,
+                  date: createdEntry.date,
+                  platforms: createdEntry.platforms,
+                  assetType: createdEntry.assetType,
+                  caption: createdEntry.caption,
+                  platformCaptions: createdEntry.platformCaptions,
+                  firstComment: createdEntry.firstComment,
+                  status: createdEntry.status,
+                  approvers: createdEntry.approvers,
+                  campaign: createdEntry.campaign,
+                  contentPillar: createdEntry.contentPillar,
+                  previewUrl: createdEntry.previewUrl,
+                  checklist: createdEntry.checklist,
+                  analytics: createdEntry.analytics,
+                  workflowStatus: createdEntry.workflowStatus,
+                  statusDetail: createdEntry.statusDetail,
+                  aiFlags: createdEntry.aiFlags,
+                  aiScore: createdEntry.aiScore,
+                  testingFrameworkId: createdEntry.testingFrameworkId,
+                  testingFrameworkName: createdEntry.testingFrameworkName,
+                  user: currentUser,
+                };
+                window.api
+                  .createEntry(payload)
+                  .then(() => window.api.listEntries().then(setEntries).catch(() => {}))
+                  .catch(() => {});
+              } catch {}
+            }
+            appendAudit({ user: currentUser, entryId: createdEntry.id, action: 'entry-create', meta: { date: createdEntry.date, assetType: createdEntry.assetType, platforms: createdEntry.platforms } });
           }
         };
 
@@ -5931,14 +6087,27 @@
           if (approvalNotifications.length) {
             addNotifications(approvalNotifications);
           }
+          if (window.api && window.api.enabled && updated?.id) {
+            try {
+              const patch = { ...updated };
+              delete patch.id;
+              window.api
+                .updateEntry(updated.id, patch)
+                .then(() => window.api.listEntries().then(setEntries).catch(() => {}))
+                .catch(() => {});
+            } catch {}
+          }
+          appendAudit({ user: currentUser, entryId: updated?.id, action: 'entry-update' });
         };
 
         const toggleApprove = (id) => {
           const timestamp = new Date().toISOString();
+          let nextStatusForServer = null;
           setEntries((prev) =>
             prev.map((entry) => {
               if (entry.id !== id) return entry;
               const toggled = entry.status === "Approved" ? "Pending" : "Approved";
+              nextStatusForServer = toggled;
               const updatedEntry = sanitizeEntry({
                 ...entry,
                 status: toggled,
@@ -5962,6 +6131,23 @@
               };
             })
           );
+          if (window.api && window.api.enabled && nextStatusForServer) {
+            try {
+              window.api
+                .updateEntry(id, { status: nextStatusForServer, approvedAt: nextStatusForServer === 'Approved' ? timestamp : null })
+                .then(() => window.api.listEntries().then(setEntries).catch(() => {}))
+                .catch(() => {});
+            } catch {}
+          }
+          appendAudit({ user: currentUser, entryId: id, action: nextStatusForServer === 'Approved' ? 'entry-approve' : 'entry-unapprove' });
+          if (window.api && window.api.enabled && guidelines?.teamsWebhookUrl) {
+            try {
+              const statusMsg = nextStatusForServer === 'Approved' ? 'approved' : 'unapproved';
+              window.api
+                .notify({ teamsWebhookUrl: guidelines.teamsWebhookUrl, message: `Entry ${id} ${statusMsg} by ${currentUser}` })
+                .catch(() => {});
+            } catch {}
+          }
         };
 
         const updateWorkflowStatus = (id, nextStatus) => {
@@ -5981,6 +6167,15 @@
               };
             })
           );
+          if (window.api && window.api.enabled) {
+            try {
+              window.api
+                .updateEntry(id, { workflowStatus: nextStatus })
+                .then(() => window.api.listEntries().then(setEntries).catch(() => {}))
+                .catch(() => {});
+            } catch {}
+          }
+          appendAudit({ user: currentUser, entryId: id, action: 'entry-workflow', meta: { to: nextStatus } });
         };
 
         const softDelete = (id) => {
@@ -5991,6 +6186,15 @@
             )
           );
           if (viewingId === id) closeEntry();
+          if (window.api && window.api.enabled) {
+            try {
+              window.api
+                .deleteEntry(id)
+                .then(() => window.api.listEntries().then(setEntries).catch(() => {}))
+                .catch(() => {});
+            } catch {}
+          }
+          appendAudit({ user: currentUser, entryId: id, action: 'entry-delete-soft' });
         };
 
         const restore = (id) => {
@@ -6000,6 +6204,15 @@
               entry.id === id ? { ...entry, deletedAt: undefined, updatedAt: timestamp } : entry
             )
           );
+          if (window.api && window.api.enabled) {
+            try {
+              window.api
+                .updateEntry(id, { deletedAt: null })
+                .then(() => window.api.listEntries().then(setEntries).catch(() => {}))
+                .catch(() => {});
+            } catch {}
+          }
+          appendAudit({ user: currentUser, entryId: id, action: 'entry-restore' });
         };
 
         const hardDelete = (id) => {
@@ -6007,6 +6220,15 @@
           if (!confirmed) return;
           setEntries((prev) => prev.filter((entry) => entry.id !== id));
           if (viewingId === id) closeEntry();
+          if (window.api && window.api.enabled) {
+            try {
+              window.api
+                .deleteEntry(id)
+                .then(() => window.api.listEntries().then(setEntries).catch(() => {}))
+                .catch(() => {});
+            } catch {}
+          }
+          appendAudit({ user: currentUser, entryId: id, action: 'entry-delete-hard' });
         };
 
         const handleSignOut = () => {
@@ -6386,6 +6608,41 @@
                       className="mt-auto"
                     >
                       View ideas
+                    </Button>
+                  </div>
+                  <div
+                    className="flex min-h-full flex-col items-start gap-4 border border-[#0F9DDE]/40 bg-white p-8 text-left text-ocean-900 shadow-[0_0_35px_rgba(15,157,222,0.3)]"
+                  >
+                    <div className="heading-font flex items-center gap-3 text-2xl font-semibold text-black">
+                      <span
+                        className={cx(
+                          "inline-block h-3 w-3 transform rounded-full bg-[#00F5FF] transition-all duration-700 ease-out",
+                          menuMotionActive ? "translate-x-0 opacity-100 rotate-180" : "translate-x-6 opacity-0"
+                        )}
+                        style={{ transitionDelay: "320ms" }}
+                        aria-hidden="true"
+                      />
+                      <span
+                        className={cx(
+                          "transform transition-all duration-700 ease-out",
+                          menuMotionActive ? "translate-x-0 opacity-100" : "translate-x-4 opacity-0"
+                        )}
+                        style={{ transitionDelay: "360ms" }}
+                      >
+                        Admin tools
+                      </span>
+                    </div>
+                    <p className="mt-3 text-sm text-graystone-600">
+                      View recent audit events and verify server connectivity.
+                    </p>
+                    <Button
+                      onClick={() => {
+                        setCurrentView("admin");
+                        closeEntry();
+                      }}
+                      className="mt-auto"
+                    >
+                      View admin
                     </Button>
                   </div>
                 </div>
@@ -7069,6 +7326,74 @@
                 </Card>
               </div>
             )}
+
+            {currentView === "admin" && (
+              <div className="space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Button variant="ghost" onClick={() => setCurrentView("menu")} className="self-start">
+                      Back to menu
+                    </Button>
+                    <h2 className="text-2xl font-semibold text-ocean-700">Admin tools</h2>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        if (window.api && window.api.enabled) {
+                          fetch('/api/health').then(()=>{}).catch(()=>{});
+                        }
+                      }}
+                    >
+                      Ping server
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        (async () => {
+                          try {
+                            if (window.api && window.api.enabled) {
+                              const res = await fetch('/api/audit?limit=200');
+                              const json = await res.json().catch(() => []);
+                              setAdminAudits(Array.isArray(json) ? json : []);
+                            } else {
+                              const raw = storageAvailable ? window.localStorage.getItem('pm-content-audit-log') : '[]';
+                              const local = raw ? JSON.parse(raw) : [];
+                              setAdminAudits(Array.isArray(local) ? local : []);
+                            }
+                          } catch {}
+                        })();
+                      }}
+                    >
+                      Refresh audits
+                    </Button>
+                  </div>
+                </div>
+
+                <Card className="shadow-xl">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-ocean-900">Recent audit events</CardTitle>
+                    <p className="mt-2 text-sm text-graystone-500">Pulled from the server when connected; local fallback otherwise.</p>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {adminAudits.length === 0 ? (
+                        <p className="text-sm text-graystone-600">No audit events.</p>
+                      ) : (
+                        adminAudits.slice(0, 200).map((row) => (
+                          <div key={row.id} className="flex items-center justify-between rounded-xl border border-graystone-200 bg-white px-3 py-2 text-sm">
+                            <div className="flex flex-col">
+                              <div className="font-medium text-ocean-800">{row.action || 'event'}</div>
+                              <div className="text-[11px] text-graystone-600">{row.user || 'Unknown'} · {row.entryId || '—'}</div>
+                            </div>
+                            <div className="text-[11px] text-graystone-500">{row.ts ? new Date(row.ts).toLocaleString() : ''}</div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
             {viewingSnapshot ? (
               <EntryModal
                 entry={viewingSnapshot}
@@ -7110,5 +7435,6 @@
       ReactDOM.createRoot(document.getElementById("root")).render(<ContentDashboard />);
     </script>
     <script type="module" src="/public/js/copyCheckerClient.js"></script>
+    <script type="module" src="/public/js/apiClient.js"></script>
   </body>
 </html>
