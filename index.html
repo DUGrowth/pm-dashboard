@@ -797,6 +797,102 @@
           .filter(Boolean);
       };
 
+      const escapeHtml = (value) => {
+        if (value === null || value === undefined) return "";
+        return String(value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      };
+
+      const buildEntryEmailContext = (entry) => {
+        if (!entry) return null;
+        const dateLabel = entry.date ? new Date(entry.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : "Not scheduled";
+        const platformsLabel = (entry.platforms || []).length ? entry.platforms.join(", ") : "Not set";
+        const descriptor = entry.caption && entry.caption.trim().length
+          ? entry.caption.trim().slice(0, 120) + (entry.caption.length > 120 ? "…" : "")
+          : `${entry.assetType || "Asset"} on ${dateLabel}`;
+        const captionPreview = entry.caption && entry.caption.trim().length ? entry.caption.trim() : "No caption provided.";
+        const link = `${window.location.origin}?entry=${encodeURIComponent(entry.id || "")}`;
+        return {
+          descriptor,
+          dateLabel,
+          platformsLabel,
+          campaign: entry.campaign || "Not set",
+          contentPillar: entry.contentPillar || "Not set",
+          captionPreview,
+          link,
+        };
+      };
+
+      const buildEntryEmailHtml = (context, actionLabel, currentUser) => {
+        if (!context) return "";
+        return `
+  <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 560px; margin: 0 auto; border: 1px solid #e0e7ff; border-radius: 16px; overflow: hidden;">
+    <div style="background: linear-gradient(135deg, #00F5FF, #0A66C2); padding: 20px;">
+      <p style="margin: 0; color: #002432; font-size: 14px; letter-spacing: 0.08em;">PM DASHBOARD</p>
+      <h2 style="margin: 8px 0 0; color: #ffffff; font-size: 22px; font-weight: 700;">${escapeHtml(currentUser)} ${escapeHtml(actionLabel)}</h2>
+    </div>
+    <div style="padding: 24px; background: #ffffff;">
+      <p style="margin: 0 0 16px; color: #1f2937; font-size: 15px; line-height: 1.5;">${escapeHtml(context.descriptor)}</p>
+      <table role="presentation" style="width: 100%; border-collapse: collapse; margin-bottom: 16px;">
+        <tbody>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 13px;">Scheduled</td>
+            <td style="padding: 8px 0; color: #111827; font-size: 14px; font-weight: 600;">${escapeHtml(context.dateLabel)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 13px;">Platforms</td>
+            <td style="padding: 8px 0; color: #111827; font-size: 14px; font-weight: 600;">${escapeHtml(context.platformsLabel)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 13px;">Campaign</td>
+            <td style="padding: 8px 0; color: #111827; font-size: 14px;">${escapeHtml(context.campaign)}</td>
+          </tr>
+          <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 13px;">Content pillar</td>
+            <td style="padding: 8px 0; color: #111827; font-size: 14px;">${escapeHtml(context.contentPillar)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="padding: 16px; background: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb;">
+        <p style="margin: 0 0 8px; color: #6b7280; font-size: 13px;">Caption preview</p>
+        <p style="margin: 0; color: #111827; font-size: 14px;">${escapeHtml(context.captionPreview)}</p>
+      </div>
+      <div style="margin-top: 24px; text-align: center;">
+        <a href="${escapeHtml(context.link)}" style="display: inline-block; padding: 12px 28px; background: #0A66C2; color: #ffffff; text-decoration: none; border-radius: 999px; font-weight: 600;">Open in PM Dashboard</a>
+      </div>
+    </div>
+  </div>
+        `.trim();
+      };
+
+      const buildEntryEmailText = (context, actionLabel, currentUser) => {
+        if (!context) return "";
+        return [
+          `${currentUser} ${actionLabel}: ${context.descriptor}`,
+          `Scheduled: ${context.dateLabel}`,
+          `Platforms: ${context.platformsLabel}`,
+          `Campaign: ${context.campaign}`,
+          `Content pillar: ${context.contentPillar}`,
+          `Caption: ${context.captionPreview}`,
+          `Open: ${context.link}`,
+        ].join("\n");
+      };
+
+      const buildEntryEmailPayload = (entry, currentUser, actionLabel, subjectLabel) => {
+        const context = buildEntryEmailContext(entry);
+        if (!context) return null;
+        const subject = `[PM Dashboard] ${subjectLabel || context.descriptor}`;
+        return {
+          subject,
+          text: buildEntryEmailText(context, actionLabel, currentUser),
+          html: buildEntryEmailHtml(context, actionLabel, currentUser),
+        };
+      };
+
       const normalizeGuidelines = (raw) => {
         if (!raw || typeof raw !== "object") {
           return {
@@ -6018,22 +6114,24 @@
           });
           if (createdEntry) {
             addNotifications(buildApprovalNotifications(createdEntry));
-            const descriptor = createdEntry.caption && createdEntry.caption.trim().length
-              ? createdEntry.caption.trim()
-              : `${createdEntry.assetType} on ${new Date(createdEntry.date).toLocaleDateString()}`;
             const entryApprovers = ensurePeopleArray(createdEntry.approvers);
             const shouldEmailApprovers =
               window.api && window.api.enabled && (entryApprovers.length || guidelines?.teamsWebhookUrl);
             if (shouldEmailApprovers) {
               try {
                 const requesterName = currentUser || createdEntry.author || 'A teammate';
+                const emailPayload = buildEntryEmailPayload(
+                  createdEntry,
+                  requesterName,
+                  'requested your approval',
+                  `Approval requested: ${createdEntry.assetType || 'Asset'}`
+                );
                 window.api
                   .notify({
                     teamsWebhookUrl: guidelines?.teamsWebhookUrl,
                     message: `${requesterName} requested approval for entry ${createdEntry.id}`,
                     approvers: entryApprovers,
-                    subject: `[PM Dashboard] Approval requested: ${descriptor}`,
-                    text: `${requesterName} requested your approval for ${descriptor} scheduled ${new Date(createdEntry.date).toLocaleDateString()}.`,
+                    ...(emailPayload || {}),
                   })
                   .catch(() => {});
               } catch {}
@@ -6178,13 +6276,20 @@
                 `${currentUser} ${statusMsg} entry ${entryRecord?.id || id}`,
                 entryRecord?.date ? `scheduled for ${new Date(entryRecord.date).toLocaleDateString()}` : '',
               ].filter(Boolean);
+              const emailPayload = buildEntryEmailPayload(
+                entryRecord,
+                currentUser,
+                `${statusMsg} this entry`,
+                `${subjectLabel} ${statusMsg}`
+              );
               window.api
                 .notify({
                   teamsWebhookUrl: guidelines?.teamsWebhookUrl,
                   message: `Entry ${id} ${statusMsg} by ${currentUser}`,
                   approvers: entryApprovers,
                   subject,
-                  text: summaryParts.join(' - '),
+                  text: emailPayload?.text || summaryParts.join(' - '),
+                  html: emailPayload?.html,
                 })
                 .catch(() => {});
             } catch {}
@@ -6192,11 +6297,18 @@
           const requestorNames = ensurePeopleArray(entryRecord?.author);
           if (nextStatusForServer === 'Approved' && requestorNames.length && window.api && window.api.enabled) {
             try {
+              const emailPayload = buildEntryEmailPayload(
+                entryRecord,
+                currentUser,
+                'approved your entry',
+                `Approved: ${descriptor}`
+              );
               window.api
                 .notify({
                   to: requestorNames,
-                  subject: `[PM Dashboard] Approved: ${descriptor}`,
-                  text: `${currentUser} approved ${descriptor}.`,
+                  subject: emailPayload?.subject || `[PM Dashboard] Approved: ${descriptor}`,
+                  text: emailPayload?.text || `${currentUser} approved ${descriptor}.`,
+                  html: emailPayload?.html,
                 })
                 .catch(() => {});
             } catch {}
