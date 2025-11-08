@@ -6101,6 +6101,7 @@
         };
 
         const toggleApprove = (id) => {
+          const entryRecord = entries.find((entry) => entry.id === id);
           const timestamp = new Date().toISOString();
           let nextStatusForServer = null;
           setEntries((prev) =>
@@ -6140,11 +6141,25 @@
             } catch {}
           }
           appendAudit({ user: currentUser, entryId: id, action: nextStatusForServer === 'Approved' ? 'entry-approve' : 'entry-unapprove' });
-          if (window.api && window.api.enabled && guidelines?.teamsWebhookUrl) {
+          const entryApprovers = ensurePeopleArray(entryRecord?.approvers);
+          const shouldNotify = window.api && window.api.enabled && (guidelines?.teamsWebhookUrl || entryApprovers.length);
+          if (shouldNotify) {
             try {
               const statusMsg = nextStatusForServer === 'Approved' ? 'approved' : 'unapproved';
+              const subjectLabel = entryRecord?.campaign || entryRecord?.contentPillar || entryRecord?.assetType || `Entry ${id}`;
+              const subject = `[PM Dashboard] ${subjectLabel} ${statusMsg}`;
+              const summaryParts = [
+                `${currentUser} ${statusMsg} entry ${entryRecord?.id || id}`,
+                entryRecord?.date ? `scheduled for ${new Date(entryRecord.date).toLocaleDateString()}` : '',
+              ].filter(Boolean);
               window.api
-                .notify({ teamsWebhookUrl: guidelines.teamsWebhookUrl, message: `Entry ${id} ${statusMsg} by ${currentUser}` })
+                .notify({
+                  teamsWebhookUrl: guidelines?.teamsWebhookUrl,
+                  message: `Entry ${id} ${statusMsg} by ${currentUser}`,
+                  approvers: entryApprovers,
+                  subject,
+                  text: summaryParts.join(' - '),
+                })
                 .catch(() => {});
             } catch {}
           }
