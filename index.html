@@ -810,19 +810,40 @@
       const buildEntryEmailContext = (entry) => {
         if (!entry) return null;
         const dateLabel = entry.date ? new Date(entry.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" }) : "Not scheduled";
-        const platformsLabel = (entry.platforms || []).length ? entry.platforms.join(", ") : "Not set";
+        const platformsArray = ensureArray(entry.platforms || []);
+        const platformsLabel = platformsArray.length ? platformsArray.join(", ") : "Not set";
         const descriptor = entry.caption && entry.caption.trim().length
           ? entry.caption.trim().slice(0, 120) + (entry.caption.length > 120 ? "…" : "")
           : `${entry.assetType || "Asset"} on ${dateLabel}`;
         const captionPreview = entry.caption && entry.caption.trim().length ? entry.caption.trim() : "No caption provided.";
         const link = `${window.location.origin}?entry=${encodeURIComponent(entry.id || "")}`;
+        const platformSections = (platformsArray.length ? platformsArray : ["Main"]).map((platform) => {
+          const caption = getPlatformCaption(entry.caption || "", entry.platformCaptions || {}, platform) || captionPreview;
+          return { platform, caption };
+        });
+        const attachments = Array.isArray(entry.attachments)
+          ? entry.attachments
+              .map((file) => {
+                if (!file || typeof file !== "object") return null;
+                const name = typeof file.name === "string" ? file.name : "Attachment";
+                const url = typeof file.url === "string" ? file.url : file.dataUrl || "";
+                return url ? { name, url } : null;
+              })
+              .filter(Boolean)
+          : [];
         return {
           descriptor,
           dateLabel,
           platformsLabel,
           campaign: entry.campaign || "Not set",
           contentPillar: entry.contentPillar || "Not set",
+          assetType: entry.assetType || "Asset",
+          author: entry.author || "Unknown",
           captionPreview,
+          platformSections,
+          previewUrl: entry.previewUrl || "",
+          attachments,
+          firstComment: entry.firstComment || "",
           link,
         };
       };
@@ -848,6 +869,10 @@
             <td style="padding: 8px 0; color: #111827; font-size: 14px; font-weight: 600;">${escapeHtml(context.platformsLabel)}</td>
           </tr>
           <tr>
+            <td style="padding: 8px 0; color: #6b7280; font-size: 13px;">Author</td>
+            <td style="padding: 8px 0; color: #111827; font-size: 14px;">${escapeHtml(context.author || currentUser)}</td>
+          </tr>
+          <tr>
             <td style="padding: 8px 0; color: #6b7280; font-size: 13px;">Campaign</td>
             <td style="padding: 8px 0; color: #111827; font-size: 14px;">${escapeHtml(context.campaign)}</td>
           </tr>
@@ -857,10 +882,53 @@
           </tr>
         </tbody>
       </table>
-      <div style="padding: 16px; background: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb;">
-        <p style="margin: 0 0 8px; color: #6b7280; font-size: 13px;">Caption preview</p>
-        <p style="margin: 0; color: #111827; font-size: 14px;">${escapeHtml(context.captionPreview)}</p>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        ${context.platformSections
+          .map(
+            (section) => `
+          <div style="padding: 16px; background: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb;">
+            <div style="display:flex; align-items:center; justify-content:space-between;">
+              <p style="margin: 0; color: #0A66C2; font-size: 13px; letter-spacing: 0.08em;">${escapeHtml(section.platform)}</p>
+              <span style="color:#6b7280; font-size:12px;">Caption</span>
+            </div>
+            <p style="margin: 8px 0 0; color: #111827; font-size: 14px; line-height:1.5;">${escapeHtml(section.caption)}</p>
+          </div>`
+          )
+          .join("")}
       </div>
+      ${
+        context.firstComment
+          ? `
+            <div style="margin-top:16px; padding:16px; background:#fff7ed; border-radius:12px; border:1px solid #fed7aa;">
+              <p style="margin:0 0 6px; color:#9a3412; font-size:13px;">First comment</p>
+              <p style="margin:0; color:#7c2d12; font-size:14px;">${escapeHtml(context.firstComment)}</p>
+            </div>`
+          : ""
+      }
+      ${
+        context.previewUrl
+          ? `
+            <div style="margin-top:16px;">
+              <p style="margin:0 0 8px; color:#6b7280; font-size:13px;">Preview asset</p>
+              <img src="${escapeHtml(context.previewUrl)}" alt="Preview asset" style="width:100%; border-radius:12px; border:1px solid #e5e7eb; object-fit:cover;" />
+            </div>`
+          : ""
+      }
+      ${
+        context.attachments && context.attachments.length
+          ? `
+            <div style="margin-top:16px;">
+              <p style="margin:0 0 8px; color:#6b7280; font-size:13px;">Attachments</p>
+              <ul style="margin:0; padding-left:18px; color:#0f172a; font-size:14px;">
+                ${context.attachments
+                  .map(
+                    (file) => `<li><a href="${escapeHtml(file.url)}" style="color:#0A66C2; text-decoration:none;">${escapeHtml(file.name)}</a></li>`
+                  )
+                  .join("")}
+              </ul>
+            </div>`
+          : ""
+      }
       <div style="margin-top: 24px; text-align: center;">
         <a href="${escapeHtml(context.link)}" style="display: inline-block; padding: 12px 28px; background: #0A66C2; color: #ffffff; text-decoration: none; border-radius: 999px; font-weight: 600;">Open in PM Dashboard</a>
       </div>
@@ -875,9 +943,14 @@
           `${currentUser} ${actionLabel}: ${context.descriptor}`,
           `Scheduled: ${context.dateLabel}`,
           `Platforms: ${context.platformsLabel}`,
+          `Author: ${context.author || currentUser}`,
           `Campaign: ${context.campaign}`,
           `Content pillar: ${context.contentPillar}`,
-          `Caption: ${context.captionPreview}`,
+          ...context.platformSections.map((section) => `${section.platform} caption: ${section.caption}`),
+          context.firstComment ? `First comment: ${context.firstComment}` : null,
+          context.attachments && context.attachments.length
+            ? `Attachments: ${context.attachments.map((file) => file.url).join(", ")}`
+            : null,
           `Open: ${context.link}`,
         ].join("\n");
       };
@@ -6113,6 +6186,10 @@
             return [entryWithStatus, ...prev];
           });
           if (createdEntry) {
+            const descriptor =
+              createdEntry.caption && createdEntry.caption.trim().length
+                ? createdEntry.caption.trim()
+                : `${createdEntry.assetType || "Asset"} on ${new Date(createdEntry.date).toLocaleDateString()}`;
             addNotifications(buildApprovalNotifications(createdEntry));
             const entryApprovers = ensurePeopleArray(createdEntry.approvers);
             const shouldEmailApprovers =
@@ -6126,12 +6203,18 @@
                   'requested your approval',
                   `Approval requested: ${createdEntry.assetType || 'Asset'}`
                 );
+                const fallbackSubject = `[PM Dashboard] Approval requested: ${descriptor}`;
+                const fallbackText = `${requesterName} requested your approval for ${descriptor} scheduled ${new Date(
+                  createdEntry.date,
+                ).toLocaleDateString()}.`;
                 window.api
                   .notify({
                     teamsWebhookUrl: guidelines?.teamsWebhookUrl,
                     message: `${requesterName} requested approval for entry ${createdEntry.id}`,
                     approvers: entryApprovers,
-                    ...(emailPayload || {}),
+                    subject: emailPayload?.subject || fallbackSubject,
+                    text: emailPayload?.text || fallbackText,
+                    html: emailPayload?.html,
                   })
                   .catch(() => {});
               } catch {}
@@ -6287,7 +6370,7 @@
                   teamsWebhookUrl: guidelines?.teamsWebhookUrl,
                   message: `Entry ${id} ${statusMsg} by ${currentUser}`,
                   approvers: entryApprovers,
-                  subject,
+                  subject: emailPayload?.subject || subject,
                   text: emailPayload?.text || summaryParts.join(' - '),
                   html: emailPayload?.html,
                 })
