@@ -28,8 +28,10 @@ Environment
   - All `/api/*` routes expect Cloudflare Access headers. Optionally limit access to specific users via `ACCESS_ALLOWED_EMAILS` (comma-separated list).
   - For local development without Access, set `ALLOW_UNAUTHENTICATED=1` and optionally `DEV_AUTH_EMAIL` / `DEV_AUTH_NAME` for the synthetic user.
   - The Teams webhook proxy restricts outbound requests to `*.office.com` / `*.office365.com` hosts by default; extend/override the allow list with `TEAMS_WEBHOOK_ALLOW_LIST` if needed.
-  - Notifications: configure `BREVO_API_KEY` (or `BREVO_API_TOKEN`), `BREVO_SENDER_EMAIL`, and `BREVO_SENDER_NAME` to send approval emails via Brevo. The API falls back to MailChannels when a Brevo key is not provided, using `MAIL_FROM`, `MAIL_FROM_NAME`, and optional `MAIL_TO`.
-  - To resolve approver/requestor names into email addresses, set `APPROVER_DIRECTORY` to a JSON object (e.g., `{"Dan Davis":"dan@example.org"}`). Client requests may pass approver names (`approvers`) and/or explicit `to` values (names or emails).
+- Notifications (MailChannels):
+  - Configure `MAIL_FROM` / `MAIL_FROM_NAME` for the sender identity. Use a domain you control and add `include:mailchannels.net` to its SPF record so recipients trust the messages.
+  - Optional `MAIL_TO` defines fallback recipients (comma-separated).
+  - `APPROVER_DIRECTORY` should be a JSON object mapping display names to email addresses (e.g., `{"Dan Davis":"dan@example.org"}`). Notify requests can pass approver names (`approvers`) and/or explicit `to` values (names or emails) and the worker resolves them through this directory.
  - For `notify` (emails via MailChannels):
    - `MAIL_FROM` (e.g., `noreply@yourdomain.com`), `MAIL_FROM_NAME` (e.g., `PM Dashboard`)
    - `MAIL_TO` optional default recipient list (comma-separated)
