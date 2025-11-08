@@ -57,7 +57,7 @@ const parseDirectory = (value: unknown) => {
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
 
 const resolveRecipients = (body: EmailPayload, env: any) => {
-  const rawEmails = Array.isArray(body.to) ? body.to : [];
+  const rawInputs = Array.isArray(body.to) ? body.to : [];
   const directory = parseDirectory(env.APPROVER_DIRECTORY);
   const approverNames = Array.isArray(body.approvers) ? body.approvers : [];
   const approverEmails = approverNames
@@ -67,11 +67,21 @@ const resolveRecipients = (body: EmailPayload, env: any) => {
       return normalized ? directory[normalized] || directory[name.trim()] : '';
     })
     .filter(Boolean);
+  const resolvedDirect = rawInputs
+    .map((value) => {
+      if (typeof value !== 'string') return '';
+      const trimmed = value.trim();
+      if (!trimmed) return '';
+      if (trimmed.includes('@')) return trimmed;
+      const normalized = trimmed.toLowerCase();
+      return directory[normalized] || directory[trimmed] || '';
+    })
+    .filter(Boolean);
   const envTo =
     typeof env.MAIL_TO === 'string' && env.MAIL_TO
       ? env.MAIL_TO.split(',').map((entry: string) => entry.trim())
       : [];
-  const combined = [...rawEmails, ...approverEmails, ...envTo]
+  const combined = [...resolvedDirect, ...approverEmails, ...envTo]
     .map((email) => (typeof email === 'string' ? email.trim() : ''))
     .filter((email) => email && email.includes('@'));
   const unique = Array.from(new Set(combined.map(normalizeEmail)));

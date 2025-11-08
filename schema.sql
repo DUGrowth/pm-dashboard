@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS entries (
   firstComment TEXT,
   status TEXT,
   approvers TEXT,
+  author TEXT,
   campaign TEXT,
   contentPillar TEXT,
   previewUrl TEXT,

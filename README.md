@@ -29,7 +29,7 @@ Environment
   - For local development without Access, set `ALLOW_UNAUTHENTICATED=1` and optionally `DEV_AUTH_EMAIL` / `DEV_AUTH_NAME` for the synthetic user.
   - The Teams webhook proxy restricts outbound requests to `*.office.com` / `*.office365.com` hosts by default; extend/override the allow list with `TEAMS_WEBHOOK_ALLOW_LIST` if needed.
   - Notifications: configure `BREVO_API_KEY` (or `BREVO_API_TOKEN`), `BREVO_SENDER_EMAIL`, and `BREVO_SENDER_NAME` to send approval emails via Brevo. The API falls back to MailChannels when a Brevo key is not provided, using `MAIL_FROM`, `MAIL_FROM_NAME`, and optional `MAIL_TO`.
-  - To resolve approver names into email addresses, set `APPROVER_DIRECTORY` to a JSON object (e.g., `{"Dan Davis":"dan@example.org"}`). Client requests may pass approver names and/or explicit `to` emails.
+  - To resolve approver/requestor names into email addresses, set `APPROVER_DIRECTORY` to a JSON object (e.g., `{"Dan Davis":"dan@example.org"}`). Client requests may pass approver names (`approvers`) and/or explicit `to` values (names or emails).
  - For `notify` (emails via MailChannels):
    - `MAIL_FROM` (e.g., `noreply@yourdomain.com`), `MAIL_FROM_NAME` (e.g., `PM Dashboard`)
    - `MAIL_TO` optional default recipient list (comma-separated)
@@ -53,6 +53,7 @@ D1 schema
 - To apply it to your D1 database:
   - Fill `database_id` in `wrangler.toml`.
   - Execute: `wrangler d1 execute pm_dashboard --file=schema.sql` (replace with your DB name).
+  - If you already have live data, be sure to `ALTER TABLE entries ADD COLUMN author TEXT;` before deploying the latest worker so created/approved entries retain the requestor name.
 
 Quality Tooling (optional)
 - This repo includes config for ESLint, Prettier, and TypeScript typechecking:

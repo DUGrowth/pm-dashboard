@@ -76,13 +76,38 @@ if (!b || typeof b.date !== 'string') return ok({ error: 'Invalid JSON' }, 400);
 const entryId = b.id || uuid();
 const createdAt = nowIso();
 const updatedAt = createdAt;
+const authorName =
+  typeof b.author === 'string' && b.author.trim()
+    ? b.author.trim()
+    : typeof b.user === 'string' && b.user.trim()
+    ? b.user.trim()
+    : 'Unknown';
 await env.DB.prepare(
-  `INSERT INTO entries (id,date,platforms,assetType,caption,platformCaptions,firstComment,status,approvers,campaign,contentPillar,previewUrl,checklist,analytics,workflowStatus,statusDetail,aiFlags,aiScore,testingFrameworkId,testingFrameworkName,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+  `INSERT INTO entries (id,date,platforms,assetType,caption,platformCaptions,firstComment,status,approvers,author,campaign,contentPillar,previewUrl,checklist,analytics,workflowStatus,statusDetail,aiFlags,aiScore,testingFrameworkId,testingFrameworkName,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 ).bind(
-entryId, b.date, str(b.platforms), b.assetType || 'Design', b.caption || '', str(b.platformCaptions), b.firstComment || '',
-b.status || 'Pending', str(b.approvers), b.campaign || '', b.contentPillar || '', b.previewUrl || '',
-str(b.checklist), str(b.analytics), b.workflowStatus || 'Draft', b.statusDetail || '', str(b.aiFlags), str(b.aiScore),
-b.testingFrameworkId || '', b.testingFrameworkName || '', createdAt, updatedAt
+entryId,
+b.date,
+str(b.platforms),
+b.assetType || 'Design',
+b.caption || '',
+str(b.platformCaptions),
+b.firstComment || '',
+b.status || 'Pending',
+str(b.approvers),
+authorName,
+b.campaign || '',
+b.contentPillar || '',
+b.previewUrl || '',
+str(b.checklist),
+str(b.analytics),
+b.workflowStatus || 'Draft',
+b.statusDetail || '',
+str(b.aiFlags),
+str(b.aiScore),
+b.testingFrameworkId || '',
+b.testingFrameworkName || '',
+createdAt,
+updatedAt
 ).run();
 const actorName = b.user || auth.user.name || auth.user.email;
 await logAudit(env, actorName, entryId, 'create', { date: b.date });
@@ -118,7 +143,7 @@ approvedAt = null;
 }
 
 await env.DB.prepare(
-  `UPDATE entries SET date=?, platforms=?, assetType=?, caption=?, platformCaptions=?, firstComment=?, status=?, approvers=?, campaign=?, contentPillar=?, previewUrl=?, checklist=?, analytics=?, workflowStatus=?, statusDetail=?, aiFlags=?, aiScore=?, testingFrameworkId=?, testingFrameworkName=?, updatedAt=?, approvedAt=? WHERE id=?`
+  `UPDATE entries SET date=?, platforms=?, assetType=?, caption=?, platformCaptions=?, firstComment=?, status=?, approvers=?, author=?, campaign=?, contentPillar=?, previewUrl=?, checklist=?, analytics=?, workflowStatus=?, statusDetail=?, aiFlags=?, aiScore=?, testingFrameworkId=?, testingFrameworkName=?, updatedAt=?, approvedAt=? WHERE id=?`
 ).bind(
 b.date ?? existing.date,
 str(b.platforms ?? parseJson(existing.platforms)),
@@ -128,6 +153,11 @@ str(b.platformCaptions ?? parseJson(existing.platformCaptions)),
 b.firstComment ?? existing.firstComment,
 status,
 str(b.approvers ?? parseJson(existing.approvers)),
+typeof b.author === 'string' && b.author.trim()
+  ? b.author.trim()
+  : (existing.author && typeof existing.author === 'string' && existing.author.trim()
+      ? existing.author.trim()
+      : existing.author) || 'Unknown',
 b.campaign ?? existing.campaign,
 b.contentPillar ?? existing.contentPillar,
 b.previewUrl ?? existing.previewUrl,

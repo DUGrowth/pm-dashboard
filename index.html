@@ -6018,6 +6018,26 @@
           });
           if (createdEntry) {
             addNotifications(buildApprovalNotifications(createdEntry));
+            const descriptor = createdEntry.caption && createdEntry.caption.trim().length
+              ? createdEntry.caption.trim()
+              : `${createdEntry.assetType} on ${new Date(createdEntry.date).toLocaleDateString()}`;
+            const entryApprovers = ensurePeopleArray(createdEntry.approvers);
+            const shouldEmailApprovers =
+              window.api && window.api.enabled && (entryApprovers.length || guidelines?.teamsWebhookUrl);
+            if (shouldEmailApprovers) {
+              try {
+                const requesterName = currentUser || createdEntry.author || 'A teammate';
+                window.api
+                  .notify({
+                    teamsWebhookUrl: guidelines?.teamsWebhookUrl,
+                    message: `${requesterName} requested approval for entry ${createdEntry.id}`,
+                    approvers: entryApprovers,
+                    subject: `[PM Dashboard] Approval requested: ${descriptor}`,
+                    text: `${requesterName} requested your approval for ${descriptor} scheduled ${new Date(createdEntry.date).toLocaleDateString()}.`,
+                  })
+                  .catch(() => {});
+              } catch {}
+            }
             if (window.api && window.api.enabled) {
               try {
                 const payload = {
@@ -6030,6 +6050,7 @@
                   firstComment: createdEntry.firstComment,
                   status: createdEntry.status,
                   approvers: createdEntry.approvers,
+                  author: createdEntry.author || currentUser || 'Unknown',
                   campaign: createdEntry.campaign,
                   contentPillar: createdEntry.contentPillar,
                   previewUrl: createdEntry.previewUrl,
@@ -6101,7 +6122,7 @@
         };
 
         const toggleApprove = (id) => {
-          const entryRecord = entries.find((entry) => entry.id === id);
+          const entryRecord = entries.find((entry) => entry.id === id) || null;
           const timestamp = new Date().toISOString();
           let nextStatusForServer = null;
           setEntries((prev) =>
@@ -6142,6 +6163,11 @@
           }
           appendAudit({ user: currentUser, entryId: id, action: nextStatusForServer === 'Approved' ? 'entry-approve' : 'entry-unapprove' });
           const entryApprovers = ensurePeopleArray(entryRecord?.approvers);
+          const descriptor = entryRecord && entryRecord.caption && entryRecord.caption.trim().length
+            ? entryRecord.caption.trim()
+            : entryRecord
+            ? `${entryRecord.assetType || 'Asset'} on ${new Date(entryRecord.date).toLocaleDateString()}`
+            : `Entry ${id}`;
           const shouldNotify = window.api && window.api.enabled && (guidelines?.teamsWebhookUrl || entryApprovers.length);
           if (shouldNotify) {
             try {
@@ -6159,6 +6185,18 @@
                   approvers: entryApprovers,
                   subject,
                   text: summaryParts.join(' - '),
+                })
+                .catch(() => {});
+            } catch {}
+          }
+          const requestorNames = ensurePeopleArray(entryRecord?.author);
+          if (nextStatusForServer === 'Approved' && requestorNames.length && window.api && window.api.enabled) {
+            try {
+              window.api
+                .notify({
+                  to: requestorNames,
+                  subject: `[PM Dashboard] Approved: ${descriptor}`,
+                  text: `${currentUser} approved ${descriptor}.`,
                 })
                 .catch(() => {});
             } catch {}
