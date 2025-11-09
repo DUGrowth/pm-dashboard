@@ -278,46 +278,63 @@
         ],
       };
 
+      const PM_PROFILE_IMAGE = "https://www.populationmatters.org/wp-content/uploads/2023/02/cropped-favicon-1-192x192.png";
       const PLATFORM_PREVIEW_META = {
         Instagram: {
-          name: "Your Brand",
-          handle: "@yourbrand",
+          name: "Population Matters",
+          handle: "@populationmatters",
           accent: "#F56040",
+          profileUrl: "https://www.instagram.com/populationmatters/",
+          avatar: PM_PROFILE_IMAGE,
         },
         Facebook: {
-          name: "Your Brand",
-          handle: "facebook.com/yourbrand",
+          name: "Population Matters",
+          handle: "facebook.com/populationmatters",
           accent: "#1877F2",
+          profileUrl: "https://www.facebook.com/populationmatters",
+          avatar: PM_PROFILE_IMAGE,
         },
         LinkedIn: {
-          name: "Your Brand",
-          handle: "Your Role • Company",
+          name: "Population Matters",
+          handle: "Non-profit Organizations · Population Matters",
           accent: "#0A66C2",
+          profileUrl: "https://www.linkedin.com/company/population-matters/",
+          avatar: PM_PROFILE_IMAGE,
         },
         "X/Twitter": {
-          name: "Your Brand",
-          handle: "@yourbrand",
+          name: "Population Matters",
+          handle: "@PopnMatters",
           accent: "#1D9BF0",
+          profileUrl: "https://twitter.com/PopnMatters",
+          avatar: PM_PROFILE_IMAGE,
         },
         TikTok: {
-          name: "yourbrand",
-          handle: "Your Brand",
+          name: "Population Matters",
+          handle: "@populationmatters",
           accent: "#EE1D52",
+          profileUrl: "https://www.tiktok.com/@populationmatters",
+          avatar: PM_PROFILE_IMAGE,
         },
         YouTube: {
-          name: "Your Brand",
-          handle: "1.2K subscribers",
+          name: "Population Matters",
+          handle: "YouTube.com/PopulationMatters",
           accent: "#FF0000",
+          profileUrl: "https://www.youtube.com/user/populationmatters",
+          avatar: PM_PROFILE_IMAGE,
         },
         Threads: {
-          name: "Your Brand",
-          handle: "@yourbrand",
+          name: "Population Matters",
+          handle: "@populationmatters",
           accent: "#101010",
+          profileUrl: "https://www.threads.net/@populationmatters",
+          avatar: PM_PROFILE_IMAGE,
         },
         Pinterest: {
-          name: "Your Brand",
-          handle: "1.5M followers",
+          name: "Population Matters",
+          handle: "pinterest.co.uk/populationmatters",
           accent: "#E60023",
+          profileUrl: "https://www.pinterest.co.uk/populationmatters/",
+          avatar: PM_PROFILE_IMAGE,
         },
       };
 
@@ -4657,87 +4674,258 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
       }
 
       function SocialPreview({ platform, caption, mediaUrl, isImage, isVideo }) {
-        const meta = PLATFORM_PREVIEW_META[platform] || PLATFORM_PREVIEW_META.Instagram;
+        const resolvedPlatform = platform === "Main" ? "LinkedIn" : platform;
+        const meta = PLATFORM_PREVIEW_META[resolvedPlatform] || PLATFORM_PREVIEW_META.LinkedIn;
         const accent = meta.accent || "#2563eb";
-        const avatarStyle = {
-          backgroundColor: `${accent}1f`,
-        };
-        const platformLabel = platform === "Main" ? "All platforms" : platform;
         const prettyCaption = caption && caption.trim().length ? caption : "Your caption will appear here.";
-
-        const renderMedia = () => {
-          if (!mediaUrl) return null;
-          if (isVideo) return <video src={mediaUrl} controls className="w-full" />;
-          if (isImage) return <img src={mediaUrl} alt={platform} className="w-full object-cover" />;
-          return null;
-        };
-
-        const renderInteractions = () => (
-          <div className="flex items-center gap-6 px-4 py-2 text-xs text-graystone-500">
-            <span style={{ color: accent }}>👍 128</span>
-            <span>💬 12</span>
-            <span>↗️ Share</span>
-          </div>
-        );
-
-        const renderBody = () => {
-          switch (platform) {
-            case "LinkedIn":
-              return (
-                <div className="space-y-2">
-                  <div className="px-4 text-sm text-graystone-800 whitespace-pre-wrap">{prettyCaption}</div>
-                  {mediaUrl ? renderMedia() : <div className="px-4 pb-3 text-xs text-graystone-500">Add an asset to complete the preview.</div>}
-                  {renderInteractions()}
-                </div>
-              );
-            case "X/Twitter":
-              return (
-                <div className="space-y-2 px-4 py-3 text-sm text-graystone-800">
-                  <div className="whitespace-pre-wrap">{prettyCaption}</div>
-                  {mediaUrl ? renderMedia() : null}
-                  <div className="flex items-center gap-6 pt-1 text-xs text-graystone-500">
-                    <span>💬 21</span>
-                    <span>🔁 34</span>
-                    <span>❤️ 210</span>
-                    <span>↗️</span>
-                  </div>
-                </div>
-              );
-            case "Instagram":
-              return (
-                <div className="space-y-0">
-                  {mediaUrl ? renderMedia() : <div className="px-4 pb-3 text-xs text-graystone-500">Add an image or reel to complete the preview.</div>}
-                  <div className="px-4 py-3 text-sm text-graystone-800 whitespace-pre-wrap">{prettyCaption}</div>
-                  <div className="flex items-center gap-4 px-4 pb-3 text-xs text-graystone-500">
-                    <span>❤ 4,532</span>
-                    <span>💬 98</span>
-                    <span>✉️ Share</span>
-                  </div>
-                </div>
-              );
-            default:
-              return (
-                <div className="space-y-2">
-                  {mediaUrl ? renderMedia() : <div className="px-4 pb-3 text-xs text-graystone-500">Add an asset to complete the preview.</div>}
-                  <div className="px-4 py-3 text-sm text-graystone-800 whitespace-pre-wrap">{prettyCaption}</div>
-                </div>
-              );
-          }
-        };
-
-        return (
-          <div className="max-w-sm overflow-hidden rounded-2xl border border-graystone-200 bg-white shadow-sm">
-            <div className="flex items-center gap-3 px-4 py-3">
-              <div className="h-9 w-9 rounded-full" style={avatarStyle} />
-              <div className="flex-1">
-                <div className="text-sm font-semibold text-ocean-900">{meta.name}</div>
-                <div className="text-xs text-graystone-500">{meta.handle}</div>
-              </div>
-              <span className="text-xs font-semibold text-graystone-400">{platformLabel}</span>
+        const displayPlatformLabel = platform === "Main" ? "All platforms" : resolvedPlatform;
+        const profileLinkProps = meta.profileUrl
+          ? {
+              href: meta.profileUrl,
+              target: "_blank",
+              rel: "noreferrer noopener",
+              title: `Open ${meta.name} on ${resolvedPlatform}`,
+            }
+          : null;
+        const HeaderLink = ({ children, className }) =>
+          profileLinkProps ? (
+            <a {...profileLinkProps} className={className}>
+              {children}
+            </a>
+          ) : (
+            <span className={className}>{children}</span>
+          );
+        const renderHeader = (opts = {}) => (
+          <div className={cx("flex items-center gap-3 px-4 py-3", opts.wrapperClassName)}>
+            <HeaderLink className={cx("h-10 w-10 overflow-hidden rounded-full border border-white shadow", opts.avatarClassName)}>
+              <img
+                src={meta.avatar || PM_PROFILE_IMAGE}
+                alt={`${meta.name} avatar`}
+                className="h-full w-full object-cover"
+                loading="lazy"
+              />
+            </HeaderLink>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <HeaderLink className={cx("text-sm font-semibold text-ocean-900 hover:underline", opts.nameClassName)}>
+                {meta.name}
+              </HeaderLink>
+              <HeaderLink className={cx("text-xs text-graystone-500 hover:underline", opts.handleClassName)}>
+                {meta.handle}
+              </HeaderLink>
             </div>
-            {renderBody()}
+            {opts.rightContent || (
+              <span className="text-[11px] uppercase tracking-wide text-graystone-400">{displayPlatformLabel}</span>
+            )}
           </div>
         );
+        const renderMedia = (options = {}) => {
+          const {
+            placeholderHeight = "h-48",
+            roundedClass = "rounded-2xl",
+            borderClass = "border border-graystone-200",
+            wrapperClassName = "",
+          } = options;
+          if (!mediaUrl) {
+            return (
+              <div
+                className={cx(
+                  "flex w-full items-center justify-center bg-graystone-50 text-xs text-graystone-500",
+                  roundedClass,
+                  borderClass,
+                  placeholderHeight,
+                  wrapperClassName,
+                )}
+              >
+                Asset preview will appear here.
+              </div>
+            );
+          }
+          if (isVideo) {
+            return (
+              <div className={cx("overflow-hidden bg-black", roundedClass, borderClass, wrapperClassName)}>
+                <video
+                  src={mediaUrl}
+                  controls
+                  playsInline
+                  className="h-full w-full"
+                  preload="metadata"
+                />
+              </div>
+            );
+          }
+          return (
+            <img
+              src={mediaUrl}
+              alt={`${resolvedPlatform} preview`}
+              className={cx("w-full object-cover", roundedClass, borderClass, wrapperClassName)}
+              loading="lazy"
+            />
+          );
+        };
+        const renderLinkedIn = () => (
+          <div className="overflow-hidden rounded-2xl border border-graystone-200 bg-white shadow-sm">
+            {renderHeader({
+              wrapperClassName: "bg-[#eef3f8]",
+              handleClassName: "text-xs text-graystone-600",
+              rightContent: (
+                <button className="rounded-full border border-[#0a66c2] px-3 py-1 text-xs font-semibold text-[#0a66c2] hover:bg-[#0a66c2] hover:text-white">
+                  Follow
+                </button>
+              ),
+            })}
+            <div className="space-y-3 px-4 pb-4 pt-3">
+              <p className="whitespace-pre-wrap text-sm text-graystone-800">{prettyCaption}</p>
+              {renderMedia()}
+            </div>
+            <div className="flex items-center justify-between border-t border-graystone-100 px-4 py-2 text-xs text-graystone-500">
+              <span className="inline-flex items-center gap-1">👍 Like</span>
+              <span className="inline-flex items-center gap-1">💬 Comment</span>
+              <span className="inline-flex items-center gap-1">↗️ Share</span>
+            </div>
+          </div>
+        );
+        const renderInstagram = () => (
+          <div className="overflow-hidden rounded-2xl border border-graystone-200 bg-white shadow-sm">
+            {renderHeader({
+              rightContent: <span className="text-xl text-graystone-400">•••</span>,
+            })}
+            {renderMedia({ placeholderHeight: "h-80" })}
+            <div className="space-y-2 px-4 py-3">
+              <div className="flex items-center gap-4 text-xl text-graystone-800">
+                <span>❤</span>
+                <span>💬</span>
+                <span>↗️</span>
+              </div>
+              <p className="whitespace-pre-wrap text-sm text-graystone-900">{prettyCaption}</p>
+            </div>
+          </div>
+        );
+        const renderTwitter = () => (
+          <div className="overflow-hidden rounded-2xl border border-[#2f3336] bg-black text-white shadow-sm">
+            {renderHeader({
+              wrapperClassName: "border-b border-[#2f3336] bg-black",
+              nameClassName: "text-white",
+              handleClassName: "text-gray-400",
+              avatarClassName: "border-[#2f3336]",
+              rightContent: <span className="text-gray-400 text-sm">•••</span>,
+            })}
+            <div className="space-y-3 px-4 py-3 text-sm">
+              <p className="whitespace-pre-wrap">{prettyCaption}</p>
+              {renderMedia({ borderClass: "border-[#2f3336]", placeholderHeight: "h-64" })}
+            </div>
+            <div className="flex items-center justify-between border-t border-[#2f3336] px-4 py-2 text-xs text-gray-400">
+              <span>💬 12</span>
+              <span>🔁 34</span>
+              <span>❤️ 210</span>
+              <span>📥 5</span>
+            </div>
+          </div>
+        );
+        const renderFacebook = () => (
+          <div className="overflow-hidden rounded-2xl border border-graystone-200 bg-white shadow-sm">
+            {renderHeader({
+              rightContent: <span className="text-xs font-semibold text-[#1877f2]">Follow</span>,
+            })}
+            <div className="space-y-3 px-4 pb-4 pt-2">
+              <p className="whitespace-pre-wrap text-sm text-graystone-800">{prettyCaption}</p>
+              {renderMedia()}
+              <div className="flex items-center justify-between border-t border-graystone-100 pt-2 text-xs text-graystone-500">
+                <span>👍 Like</span>
+                <span>💬 Comment</span>
+                <span>↗️ Share</span>
+              </div>
+            </div>
+          </div>
+        );
+        const renderTikTok = () => (
+          <div className="overflow-hidden rounded-2xl border border-graystone-200 bg-[#111] text-white shadow-sm">
+            {renderHeader({
+              wrapperClassName: "border-b border-[#222] bg-[#111]",
+              nameClassName: "text-white",
+              handleClassName: "text-gray-400",
+              rightContent: (
+                <button className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-black">Follow</button>
+              ),
+            })}
+            <div className="space-y-3 px-4 py-3 text-sm">
+              {renderMedia({ borderClass: "border-[#222]", placeholderHeight: "h-72" })}
+              <p className="whitespace-pre-wrap">{prettyCaption}</p>
+            </div>
+            <div className="flex items-center gap-6 border-t border-[#222] px-4 py-2 text-xs text-gray-300">
+              <span>❤ 4.5K</span>
+              <span>💬 320</span>
+              <span>↗️ Share</span>
+            </div>
+          </div>
+        );
+        const renderYouTube = () => (
+          <div className="overflow-hidden rounded-2xl border border-graystone-200 bg-white shadow-sm">
+            {renderHeader({
+              rightContent: (
+                <span className="text-xs font-semibold text-[#ff0000]">
+                  Subscribe
+                </span>
+              ),
+            })}
+            <div className="px-4 pb-4 pt-2">
+              {renderMedia({ placeholderHeight: "h-60", roundedClass: "rounded-xl" })}
+              <p className="mt-3 whitespace-pre-wrap text-sm text-graystone-800">{prettyCaption}</p>
+            </div>
+          </div>
+        );
+        const renderThreads = () => (
+          <div className="overflow-hidden rounded-2xl border border-graystone-200 bg-white shadow-sm">
+            {renderHeader({
+              nameClassName: "text-graystone-900",
+              handleClassName: "text-graystone-500",
+            })}
+            <div className="space-y-3 px-4 py-3">
+              <p className="whitespace-pre-wrap text-sm text-graystone-900">{prettyCaption}</p>
+              {renderMedia({ placeholderHeight: "h-40", roundedClass: "rounded-xl" })}
+            </div>
+          </div>
+        );
+        const renderPinterest = () => (
+          <div className="overflow-hidden rounded-2xl border border-graystone-200 bg-white shadow-sm">
+            {renderHeader({
+              rightContent: <button className="rounded-full bg-[#e60023] px-3 py-1 text-xs font-semibold text-white">Save</button>,
+            })}
+            <div className="px-4 pb-4 pt-2">
+              {renderMedia({ placeholderHeight: "h-80", roundedClass: "rounded-3xl" })}
+              <p className="mt-3 whitespace-pre-wrap text-sm text-graystone-800">{prettyCaption}</p>
+            </div>
+          </div>
+        );
+        const renderDefault = () => (
+          <div className="overflow-hidden rounded-2xl border border-graystone-200 bg-white shadow-sm">
+            {renderHeader()}
+            <div className="space-y-3 px-4 pb-4 pt-2">
+              <p className="whitespace-pre-wrap text-sm text-graystone-800">{prettyCaption}</p>
+              {renderMedia()}
+            </div>
+          </div>
+        );
+
+        switch (resolvedPlatform) {
+          case "LinkedIn":
+            return renderLinkedIn();
+          case "Instagram":
+            return renderInstagram();
+          case "X/Twitter":
+            return renderTwitter();
+          case "Facebook":
+            return renderFacebook();
+          case "TikTok":
+            return renderTikTok();
+          case "YouTube":
+            return renderYouTube();
+          case "Threads":
+            return renderThreads();
+          case "Pinterest":
+            return renderPinterest();
+          default:
+            return renderDefault();
+        }
       }
 
       function EntryModal({
