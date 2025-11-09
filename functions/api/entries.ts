@@ -83,7 +83,7 @@ const authorName =
     ? b.user.trim()
     : 'Unknown';
 await env.DB.prepare(
-  `INSERT INTO entries (id,date,platforms,assetType,caption,platformCaptions,firstComment,status,approvers,author,campaign,contentPillar,previewUrl,checklist,analytics,workflowStatus,statusDetail,aiFlags,aiScore,testingFrameworkId,testingFrameworkName,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+  `INSERT INTO entries (id,date,platforms,assetType,caption,platformCaptions,firstComment,approvalDeadline,status,approvers,author,campaign,contentPillar,previewUrl,checklist,analytics,workflowStatus,statusDetail,aiFlags,aiScore,testingFrameworkId,testingFrameworkName,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 ).bind(
 entryId,
 b.date,
@@ -92,6 +92,7 @@ b.assetType || 'Design',
 b.caption || '',
 str(b.platformCaptions),
 b.firstComment || '',
+b.approvalDeadline || '',
 b.status || 'Pending',
 str(b.approvers),
 authorName,
@@ -143,7 +144,7 @@ approvedAt = null;
 }
 
 await env.DB.prepare(
-  `UPDATE entries SET date=?, platforms=?, assetType=?, caption=?, platformCaptions=?, firstComment=?, status=?, approvers=?, author=?, campaign=?, contentPillar=?, previewUrl=?, checklist=?, analytics=?, workflowStatus=?, statusDetail=?, aiFlags=?, aiScore=?, testingFrameworkId=?, testingFrameworkName=?, updatedAt=?, approvedAt=? WHERE id=?`
+  `UPDATE entries SET date=?, platforms=?, assetType=?, caption=?, platformCaptions=?, firstComment=?, approvalDeadline=?, status=?, approvers=?, author=?, campaign=?, contentPillar=?, previewUrl=?, checklist=?, analytics=?, workflowStatus=?, statusDetail=?, aiFlags=?, aiScore=?, testingFrameworkId=?, testingFrameworkName=?, updatedAt=?, approvedAt=? WHERE id=?`
 ).bind(
 b.date ?? existing.date,
 str(b.platforms ?? parseJson(existing.platforms)),
@@ -151,6 +152,7 @@ b.assetType ?? existing.assetType,
 b.caption ?? existing.caption,
 str(b.platformCaptions ?? parseJson(existing.platformCaptions)),
 b.firstComment ?? existing.firstComment,
+ b.approvalDeadline ?? existing.approvalDeadline ?? '',
 status,
 str(b.approvers ?? parseJson(existing.approvers)),
 typeof b.author === 'string' && b.author.trim()

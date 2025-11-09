@@ -52,7 +52,7 @@ D1 schema
 - To apply it to your D1 database:
   - Fill `database_id` in `wrangler.toml`.
   - Execute: `wrangler d1 execute pm_dashboard --file=schema.sql` (replace with your DB name).
-  - If you already have live data, be sure to `ALTER TABLE entries ADD COLUMN author TEXT;` before deploying the latest worker so created/approved entries retain the requestor name.
+  - If you already have live data, be sure to `ALTER TABLE entries ADD COLUMN author TEXT;` and `ALTER TABLE entries ADD COLUMN approvalDeadline TEXT;` before deploying the latest worker so created/approved entries retain the requestor name and approval due dates.
 
 Quality Tooling (optional)
 - This repo includes config for ESLint, Prettier, and TypeScript typechecking:

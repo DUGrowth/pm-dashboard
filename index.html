@@ -844,20 +844,23 @@
           previewUrl: entry.previewUrl || "",
           attachments,
           firstComment: entry.firstComment || "",
+          deadline: entry.approvalDeadline || "",
           link,
         };
       };
 
-      const buildEntryEmailHtml = (context, actionLabel, currentUser) => {
+      const buildEntryEmailHtml = (context) => {
         if (!context) return "";
         return `
-  <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 560px; margin: 0 auto; border: 1px solid #e0e7ff; border-radius: 16px; overflow: hidden;">
-    <div style="background: linear-gradient(135deg, #00F5FF, #0A66C2); padding: 20px;">
-      <p style="margin: 0; color: #002432; font-size: 14px; letter-spacing: 0.08em;">PM DASHBOARD</p>
-      <h2 style="margin: 8px 0 0; color: #ffffff; font-size: 22px; font-weight: 700;">${escapeHtml(currentUser)} ${escapeHtml(actionLabel)}</h2>
-    </div>
-    <div style="padding: 24px; background: #ffffff;">
-      <p style="margin: 0 0 16px; color: #1f2937; font-size: 15px; line-height: 1.5;">${escapeHtml(context.descriptor)}</p>
+  <div style="font-family:'Helvetica Neue',Arial,sans-serif; max-width:640px; margin:0 auto; color:#0f172a;">
+    <div style="padding:32px; background:#f7fbff; border:1px solid #dbeafe; border-radius:24px;">
+      <div style="text-align:center; margin-bottom:24px;">
+        <p style="margin:0; font-size:12px; letter-spacing:0.2em; color:#94a3b8;">PM DASHBOARD</p>
+        <h1 style="margin:12px 0 0; font-size:24px; color:#0f172a;">${escapeHtml(context.author)} has asked you to approve social media content</h1>
+      </div>
+      <p style="margin:0 0 16px; font-size:15px; line-height:1.6;">${escapeHtml(context.author)} has asked you to take a look at some content for social media. ${
+          context.deadline ? `Please approve it by <span style="font-weight:600;">${escapeHtml(context.deadline)}</span>.` : 'Please review it when you can.'
+        } See the content below.</p>
       <table role="presentation" style="width: 100%; border-collapse: collapse; margin-bottom: 16px;">
         <tbody>
           <tr>
@@ -870,7 +873,7 @@
           </tr>
           <tr>
             <td style="padding: 8px 0; color: #6b7280; font-size: 13px;">Author</td>
-            <td style="padding: 8px 0; color: #111827; font-size: 14px;">${escapeHtml(context.author || currentUser)}</td>
+            <td style="padding: 8px 0; color: #111827; font-size: 14px;">${escapeHtml(context.author)}</td>
           </tr>
           <tr>
             <td style="padding: 8px 0; color: #6b7280; font-size: 13px;">Campaign</td>
@@ -886,10 +889,10 @@
         ${context.platformSections
           .map(
             (section) => `
-          <div style="padding: 16px; background: #f9fafb; border-radius: 12px; border: 1px solid #e5e7eb;">
+          <div style="padding: 16px; background: #ffffff; border-radius: 20px; border: 1px solid #e2e8f0;">
             <div style="display:flex; align-items:center; justify-content:space-between;">
-              <p style="margin: 0; color: #0A66C2; font-size: 13px; letter-spacing: 0.08em;">${escapeHtml(section.platform)}</p>
-              <span style="color:#6b7280; font-size:12px;">Caption</span>
+              <p style="margin: 0; color: #0A66C2; font-size: 13px; letter-spacing: 0.2em;">${escapeHtml(section.platform)}</p>
+              <span style="color:#94a3b8; font-size:12px;">Caption</span>
             </div>
             <p style="margin: 8px 0 0; color: #111827; font-size: 14px; line-height:1.5;">${escapeHtml(section.caption)}</p>
           </div>`
@@ -897,75 +900,77 @@
           .join("")}
       </div>
       ${
-        context.firstComment
-          ? `
-            <div style="margin-top:16px; padding:16px; background:#fff7ed; border-radius:12px; border:1px solid #fed7aa;">
-              <p style="margin:0 0 6px; color:#9a3412; font-size:13px;">First comment</p>
-              <p style="margin:0; color:#7c2d12; font-size:14px;">${escapeHtml(context.firstComment)}</p>
-            </div>`
-          : ""
-      }
-      ${
         context.previewUrl
           ? `
-            <div style="margin-top:16px;">
-              <p style="margin:0 0 8px; color:#6b7280; font-size:13px;">Preview asset</p>
-              <img src="${escapeHtml(context.previewUrl)}" alt="Preview asset" style="width:100%; border-radius:12px; border:1px solid #e5e7eb; object-fit:cover;" />
-            </div>`
-          : ""
+      <div style="margin-top:16px;">
+        <p style="margin:0 0 8px; color:#6b7280; font-size:13px;">Preview asset</p>
+        <img src="${escapeHtml(context.previewUrl)}" alt="Preview asset" style="width:100%; border-radius:12px; border:1px solid #e5e7eb; object-fit:cover;" />
+      </div>`
+          : ''
       }
       ${
         context.attachments && context.attachments.length
           ? `
-            <div style="margin-top:16px;">
-              <p style="margin:0 0 8px; color:#6b7280; font-size:13px;">Attachments</p>
-              <ul style="margin:0; padding-left:18px; color:#0f172a; font-size:14px;">
-                ${context.attachments
-                  .map(
-                    (file) => `<li><a href="${escapeHtml(file.url)}" style="color:#0A66C2; text-decoration:none;">${escapeHtml(file.name)}</a></li>`
-                  )
-                  .join("")}
-              </ul>
-            </div>`
-          : ""
+      <div style="margin-top:16px;">
+        <p style="margin:0 0 8px; color:#6b7280; font-size:13px;">Attachments</p>
+        <ul style="margin:0; padding-left:18px; color:#0f172a; font-size:14px;">
+          ${context.attachments
+            .map((file) => `<li><a href="${escapeHtml(file.url)}" style="color:#0A66C2; text-decoration:none;">${escapeHtml(file.name)}</a></li>`)
+            .join('')}
+        </ul>
+      </div>`
+          : ''
+      }
+      ${
+        context.firstComment
+          ? `
+      <div style="margin-top:16px; padding:16px; background:#fff7ed; border-radius:12px; border:1px solid #fed7aa;">
+        <p style="margin:0 0 6px; color:#9a3412; font-size:13px;">First comment</p>
+        <p style="margin:0; color:#7c2d12; font-size:14px;">${escapeHtml(context.firstComment)}</p>
+      </div>`
+          : ''
       }
       <div style="margin-top: 24px; text-align: center;">
-        <a href="${escapeHtml(context.link)}" style="display: inline-block; padding: 12px 28px; background: #0A66C2; color: #ffffff; text-decoration: none; border-radius: 999px; font-weight: 600;">Open in PM Dashboard</a>
+        <a href="${escapeHtml(context.link)}" style="display: inline-block; padding: 14px 36px; background: #0A66C2; color: #ffffff; text-decoration: none; border-radius: 999px; font-weight: 600;">Review in PM Dashboard</a>
       </div>
     </div>
   </div>
         `.trim();
       };
-
-      const buildEntryEmailText = (context, actionLabel, currentUser) => {
+const buildEntryEmailText = (context) => {
         if (!context) return "";
         return [
-          `${currentUser} ${actionLabel}: ${context.descriptor}`,
+          `${context.author} has asked you to approve social media content`,
           `Scheduled: ${context.dateLabel}`,
           `Platforms: ${context.platformsLabel}`,
-          `Author: ${context.author || currentUser}`,
+          `Author: ${context.author}`,
           `Campaign: ${context.campaign}`,
           `Content pillar: ${context.contentPillar}`,
+          context.deadline ? `Approval deadline: ${context.deadline}` : null,
           ...context.platformSections.map((section) => `${section.platform} caption: ${section.caption}`),
           context.firstComment ? `First comment: ${context.firstComment}` : null,
           context.attachments && context.attachments.length
-            ? `Attachments: ${context.attachments.map((file) => file.url).join(", ")}`
+            ? `Attachments: ${context.attachments.map((file) => file.url).join(', ')}`
             : null,
           `Open: ${context.link}`,
-        ].join("\n");
+        ]
+          .filter(Boolean)
+          .join("
+");
       };
 
-      const buildEntryEmailPayload = (entry, currentUser, actionLabel, subjectLabel) => {
+const buildEntryEmailPayload = (entry, opts = {}) => {
+        const { subjectOverride } = opts || {};
         const context = buildEntryEmailContext(entry);
         if (!context) return null;
-        const subject = `[PM Dashboard] ${subjectLabel || context.descriptor}`;
+        const subject =
+          subjectOverride || `${context.author} has asked you to approve social media content`;
         return {
           subject,
-          text: buildEntryEmailText(context, actionLabel, currentUser),
-          html: buildEntryEmailHtml(context, actionLabel, currentUser),
+          text: buildEntryEmailText(context),
+          html: buildEntryEmailHtml(context),
         };
       };
-
       const normalizeGuidelines = (raw) => {
         if (!raw || typeof raw !== "object") {
           return {
@@ -1255,6 +1260,7 @@
           author,
           caption,
           url,
+          approvalDeadline: typeof entry.approvalDeadline === "string" ? entry.approvalDeadline : "",
           campaign: CAMPAIGNS.includes(entry.campaign) ? entry.campaign : "",
           contentPillar: CONTENT_PILLARS.includes(entry.contentPillar)
             ? entry.contentPillar
@@ -2000,6 +2006,7 @@
         const [allPlatforms, setAllPlatforms] = useState(false);
         const [caption, setCaption] = useState("");
         const [url, setUrl] = useState("");
+        const [approvalDeadline, setApprovalDeadline] = useState("");
         const [assetType, setAssetType] = useState("Design");
         const [script, setScript] = useState("");
         const [designCopy, setDesignCopy] = useState("");
@@ -2080,6 +2087,7 @@
           setAllPlatforms(false);
           setCaption("");
           setUrl("");
+          setApprovalDeadline("");
           setPreviewUrl("");
           setAssetType("Design");
           setScript("");
@@ -2112,6 +2120,7 @@
             platforms: ensureArray(allPlatforms ? [...ALL_PLATFORMS] : platforms),
             caption,
             url: url || undefined,
+            approvalDeadline: approvalDeadline || undefined,
             previewUrl: previewUrl || undefined,
             assetType,
             script: assetType === "Video" ? script : undefined,
@@ -2212,6 +2221,20 @@
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="approvalDeadline">Approval deadline</Label>
+                <Input
+                  id="approvalDeadline"
+                  type="datetime-local"
+                  value={approvalDeadline}
+                  onChange={(event) => setApprovalDeadline(event.target.value)}
+                  className="w-full"
+                />
+                <p className="text-xs text-graystone-500">
+                  Let approvers know when you need a decision by (optional).
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -6197,12 +6220,7 @@
             if (shouldEmailApprovers) {
               try {
                 const requesterName = currentUser || createdEntry.author || 'A teammate';
-                const emailPayload = buildEntryEmailPayload(
-                  createdEntry,
-                  requesterName,
-                  'requested your approval',
-                  `Approval requested: ${createdEntry.assetType || 'Asset'}`
-                );
+                const emailPayload = buildEntryEmailPayload(createdEntry);
                 const fallbackSubject = `[PM Dashboard] Approval requested: ${descriptor}`;
                 const fallbackText = `${requesterName} requested your approval for ${descriptor} scheduled ${new Date(
                   createdEntry.date,
@@ -6235,6 +6253,7 @@
                   campaign: createdEntry.campaign,
                   contentPillar: createdEntry.contentPillar,
                   previewUrl: createdEntry.previewUrl,
+                  approvalDeadline: createdEntry.approvalDeadline,
                   checklist: createdEntry.checklist,
                   analytics: createdEntry.analytics,
                   workflowStatus: createdEntry.workflowStatus,
@@ -6359,12 +6378,7 @@
                 `${currentUser} ${statusMsg} entry ${entryRecord?.id || id}`,
                 entryRecord?.date ? `scheduled for ${new Date(entryRecord.date).toLocaleDateString()}` : '',
               ].filter(Boolean);
-              const emailPayload = buildEntryEmailPayload(
-                entryRecord,
-                currentUser,
-                `${statusMsg} this entry`,
-                `${subjectLabel} ${statusMsg}`
-              );
+              const emailPayload = buildEntryEmailPayload(entryRecord, { subjectOverride: `${subjectLabel} ${statusMsg}` });
               window.api
                 .notify({
                   teamsWebhookUrl: guidelines?.teamsWebhookUrl,
@@ -6380,18 +6394,13 @@
           const requestorNames = ensurePeopleArray(entryRecord?.author);
           if (nextStatusForServer === 'Approved' && requestorNames.length && window.api && window.api.enabled) {
             try {
-              const emailPayload = buildEntryEmailPayload(
-                entryRecord,
-                currentUser,
-                'approved your entry',
-                `Approved: ${descriptor}`
-              );
+              const subjectApproved = `[PM Dashboard] Approved: ${descriptor}`;
+              const textApproved = `${currentUser} approved ${descriptor}.`;
               window.api
                 .notify({
                   to: requestorNames,
-                  subject: emailPayload?.subject || `[PM Dashboard] Approved: ${descriptor}`,
-                  text: emailPayload?.text || `${currentUser} approved ${descriptor}.`,
-                  html: emailPayload?.html,
+                  subject: subjectApproved,
+                  text: textApproved,
                 })
                 .catch(() => {});
             } catch {}

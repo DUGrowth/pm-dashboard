@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS entries (
   caption TEXT,
   platformCaptions TEXT,
   firstComment TEXT,
+  approvalDeadline TEXT,
   status TEXT,
   approvers TEXT,
   author TEXT,
