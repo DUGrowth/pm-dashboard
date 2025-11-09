@@ -79,11 +79,9 @@ const updatedAt = createdAt;
 const authorName =
   typeof b.author === 'string' && b.author.trim()
     ? b.author.trim()
-    : typeof b.user === 'string' && b.user.trim()
-    ? b.user.trim()
-    : 'Unknown';
+    : (auth.user.name || auth.user.email || 'Unknown');
 await env.DB.prepare(
-  `INSERT INTO entries (id,date,platforms,assetType,caption,platformCaptions,firstComment,approvalDeadline,status,approvers,author,campaign,contentPillar,previewUrl,checklist,analytics,workflowStatus,statusDetail,aiFlags,aiScore,testingFrameworkId,testingFrameworkName,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+  `INSERT INTO entries (id,date,platforms,assetType,caption,platformCaptions,firstComment,approvalDeadline,status,approvers,author,campaign,contentPillar,previewUrl,checklist,analytics,workflowStatus,statusDetail,aiFlags,aiScore,testingFrameworkId,testingFrameworkName,createdAt,updatedAt,approvedAt,deletedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 ).bind(
 entryId,
 b.date,
@@ -108,9 +106,11 @@ str(b.aiScore),
 b.testingFrameworkId || '',
 b.testingFrameworkName || '',
 createdAt,
-updatedAt
+updatedAt,
+null,
+null
 ).run();
-const actorName = b.user || auth.user.name || auth.user.email;
+const actorName = auth.user.name || auth.user.email;
 await logAudit(env, actorName, entryId, 'create', { date: b.date });
 return ok({ id: entryId });
 };
@@ -130,9 +130,10 @@ const wasApproved = existing.status === 'Approved';
 
 const updatedAt = nowIso();
 let status = b.status ?? existing.status ?? 'Pending';
-let approvedAt = b.approvedAt ?? existing.approvedAt ?? null;
-
 const hasField = (field: string) => Object.prototype.hasOwnProperty.call(b, field);
+let approvedAt = hasField('approvedAt') ? (b.approvedAt ?? null) : existing.approvedAt ?? null;
+const deletedAt = hasField('deletedAt') ? (b.deletedAt ?? null) : existing.deletedAt ?? null;
+
 const contentChanged =
 (hasField('caption') && b.caption !== existing.caption) ||
 (hasField('platformCaptions') && str(b.platformCaptions) !== existing.platformCaptions) ||
@@ -144,7 +145,7 @@ approvedAt = null;
 }
 
 await env.DB.prepare(
-  `UPDATE entries SET date=?, platforms=?, assetType=?, caption=?, platformCaptions=?, firstComment=?, approvalDeadline=?, status=?, approvers=?, author=?, campaign=?, contentPillar=?, previewUrl=?, checklist=?, analytics=?, workflowStatus=?, statusDetail=?, aiFlags=?, aiScore=?, testingFrameworkId=?, testingFrameworkName=?, updatedAt=?, approvedAt=? WHERE id=?`
+  `UPDATE entries SET date=?, platforms=?, assetType=?, caption=?, platformCaptions=?, firstComment=?, approvalDeadline=?, status=?, approvers=?, author=?, campaign=?, contentPillar=?, previewUrl=?, checklist=?, analytics=?, workflowStatus=?, statusDetail=?, aiFlags=?, aiScore=?, testingFrameworkId=?, testingFrameworkName=?, updatedAt=?, approvedAt=?, deletedAt=? WHERE id=?`
 ).bind(
 b.date ?? existing.date,
 str(b.platforms ?? parseJson(existing.platforms)),
@@ -173,12 +174,13 @@ b.testingFrameworkId ?? existing.testingFrameworkId,
 b.testingFrameworkName ?? existing.testingFrameworkName,
 updatedAt,
 approvedAt,
+deletedAt,
 id
 ).run();
 
-const actorName = b.user || auth.user.name || auth.user.email;
+const actorName = auth.user.name || auth.user.email;
 await logAudit(env, actorName, id, 'update', { contentChanged, status });
-return ok({ ok: true, status, approvedAt });
+return ok({ ok: true, status, approvedAt, deletedAt });
 };
 
 export const onRequestDelete = async ({ request, env }: { request: Request; env: any }) => {
@@ -187,9 +189,17 @@ if (!auth.ok) return ok({ error: auth.error }, auth.status);
 const url = new URL(request.url);
 const id = url.searchParams.get('id');
 if (!id) return ok({ error: 'Missing id' }, 400);
+const actorName = auth.user.name || auth.user.email;
+const hard = url.searchParams.get('hard') === '1';
+
+if (hard) {
+await env.DB.prepare('DELETE FROM entries WHERE id=?').bind(id).run();
+await logAudit(env, actorName, id, 'deleteHard', {});
+return ok({ ok: true, deleted: 'hard' });
+}
+
 const ts = nowIso();
 await env.DB.prepare('UPDATE entries SET deletedAt=? WHERE id=?').bind(ts, id).run();
-const actorName = auth.user.name || auth.user.email;
-await logAudit(env, actorName, id, 'delete', {});
-return ok({ ok: true });
+await logAudit(env, actorName, id, 'deleteSoft', {});
+return ok({ ok: true, deleted: 'soft', deletedAt: ts });
 };

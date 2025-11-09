@@ -955,8 +955,7 @@ const buildEntryEmailText = (context) => {
           `Open: ${context.link}`,
         ]
           .filter(Boolean)
-          .join("
-");
+          .join("\n");
       };
 
 const buildEntryEmailPayload = (entry, opts = {}) => {
@@ -4136,7 +4135,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           </div>
           <div className="flex items-center justify-between border-t border-graystone-200 bg-graystone-50 px-6 py-4">
             <p className="text-xs text-graystone-500">
-              Changes are saved locally and can be referenced by your team anytime.
+              Changes sync to the server when connected, with local fallback if offline.
             </p>
             <div className="flex items-center gap-3">
               <Button variant="ghost" onClick={onClose}>
@@ -5581,16 +5580,22 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           (async () => {
             try {
               if (window.api && window.api.enabled) {
-                const [serverEntries, serverIdeas, serverLinkedIn, serverFrameworks] = await Promise.all([
+                const [serverEntries, serverIdeas, serverLinkedIn, serverFrameworks, serverGuidelines] = await Promise.all([
                   window.api.listEntries().catch(() => []),
                   window.api.listIdeas().catch(() => []),
                   window.api.listLinkedIn().catch(() => []),
                   window.api.listTestingFrameworks().catch(() => []),
+                  window.api.getGuidelines ? window.api.getGuidelines().catch(() => null) : Promise.resolve(null),
                 ]);
                 if (Array.isArray(serverEntries)) setEntries(serverEntries);
                 if (Array.isArray(serverIdeas)) setIdeas(serverIdeas);
                 if (Array.isArray(serverLinkedIn)) setLinkedinSubmissions(serverLinkedIn);
                 if (Array.isArray(serverFrameworks)) setTestingFrameworks(serverFrameworks);
+                if (serverGuidelines) {
+                  const normalized = normalizeGuidelines(serverGuidelines);
+                  setGuidelines(normalized);
+                  saveGuidelines(normalized);
+                }
               }
             } catch {}
           })();
@@ -5605,11 +5610,17 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 window.api.listIdeas().catch(() => []),
                 window.api.listLinkedIn().catch(() => []),
                 window.api.listTestingFrameworks().catch(() => []),
-              ]).then(([serverEntries, serverIdeas, serverLinkedIn, serverFrameworks]) => {
+                window.api.getGuidelines ? window.api.getGuidelines().catch(() => null) : Promise.resolve(null),
+              ]).then(([serverEntries, serverIdeas, serverLinkedIn, serverFrameworks, serverGuidelines]) => {
                 if (Array.isArray(serverEntries)) setEntries(serverEntries);
                 if (Array.isArray(serverIdeas)) setIdeas(serverIdeas);
                 if (Array.isArray(serverLinkedIn)) setLinkedinSubmissions(serverLinkedIn);
                 if (Array.isArray(serverFrameworks)) setTestingFrameworks(serverFrameworks);
+                if (serverGuidelines) {
+                  const normalized = normalizeGuidelines(serverGuidelines);
+                  setGuidelines(normalized);
+                  saveGuidelines(normalized);
+                }
               }).catch(() => {});
             }
           };
@@ -5645,6 +5656,11 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           const normalized = normalizeGuidelines(next);
           setGuidelines(normalized);
           saveGuidelines(normalized);
+          if (window.api && window.api.enabled && window.api.saveGuidelines) {
+            try {
+              window.api.saveGuidelines(normalized).catch(() => {});
+            } catch {}
+          }
           setGuidelinesOpen(false);
         };
 
@@ -5920,11 +5936,42 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             ambiguous: [],
             errors: [],
           };
+          let updatedEntriesSnapshot = [];
           setEntries((prev) => {
             const { nextEntries, summary: computed } = mergePerformanceData(prev, dataset);
             summary = computed;
+            updatedEntriesSnapshot = nextEntries;
             return nextEntries;
           });
+          const shouldPersist =
+            window.api &&
+            window.api.enabled &&
+            Array.isArray(summary.updatedEntries) &&
+            summary.updatedEntries.length;
+          if (shouldPersist) {
+            try {
+              const entryMap = new Map(
+                (updatedEntriesSnapshot || []).map((entry) => [entry.id, entry])
+              );
+              const updates = summary.updatedEntries
+                .map((entryId) => {
+                  const latest = entryMap.get(entryId);
+                  if (!latest) return null;
+                  return window.api
+                    .updateEntry(entryId, {
+                      analytics: latest.analytics,
+                      analyticsUpdatedAt: latest.analyticsUpdatedAt,
+                    })
+                    .catch(() => {});
+                })
+                .filter(Boolean);
+              if (updates.length) {
+                Promise.all(updates)
+                  .then(() => window.api.listEntries().then(setEntries).catch(() => {}))
+                  .catch(() => {});
+              }
+            } catch {}
+          }
           return summary;
         };
 
@@ -6480,7 +6527,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           if (window.api && window.api.enabled) {
             try {
               window.api
-                .deleteEntry(id)
+                .deleteEntry(id, { hard: true })
                 .then(() => window.api.listEntries().then(setEntries).catch(() => {}))
                 .catch(() => {});
             } catch {}

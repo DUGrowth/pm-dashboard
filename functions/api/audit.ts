@@ -31,12 +31,11 @@ if (!b || typeof b !== 'object') return ok({ error: 'Invalid JSON' }, 400);
 const id = uuid();
 const ts = nowIso();
 const actorName = auth.user.name || auth.user.email;
-const user = typeof b.user === 'string' ? b.user : actorName;
 const entryId = typeof b.entryId === 'string' ? b.entryId : '';
 const action = typeof b.action === 'string' ? b.action : '';
 const meta = b.meta && typeof b.meta === 'object' ? JSON.stringify(b.meta) : JSON.stringify({});
 await env.DB.prepare('INSERT INTO audit (id,ts,user,entryId,action,meta) VALUES (?,?,?,?,?,?)')
-.bind(id, ts, user, entryId, action, meta)
+.bind(id, ts, actorName, entryId, action, meta)
 .run();
 return ok({ id, ts });
 };

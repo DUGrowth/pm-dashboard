@@ -156,6 +156,8 @@ function postValidate(result: any, input: any) {
   return { score, flags, suggestion, variants, explanations };
 }
 
+const withFallbackMeta = (payload: any) => ({ ...payload, fallback: true });
+
 export const onRequestPost = async ({ request, env }: { request: Request; env: any }) => {
   const auth = authorizeRequest(request, env);
   if (!auth.ok) return ok({ error: auth.error }, auth.status);
@@ -175,7 +177,7 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: a
   if (!env.OPENAI_API_KEY) {
     // Fallback if key is missing
     const fb = postValidate(null, b);
-    return ok(fb, 422);
+    return ok(withFallbackMeta(fb));
   }
 
   const SYSTEM_PROMPT =
@@ -222,7 +224,7 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: a
     raw = j?.choices?.[0]?.message?.content ?? '';
   } catch {
     const fb = postValidate(null, b);
-    return ok(fb, 502);
+    return ok(withFallbackMeta(fb));
   }
 
   let parsed: any;
@@ -251,7 +253,7 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: a
       parsed = JSON.parse((j2?.choices?.[0]?.message?.content || '').trim());
     } catch {
       const fb = postValidate(null, b);
-      return ok(fb, 422);
+      return ok(withFallbackMeta(fb));
     }
   }
 

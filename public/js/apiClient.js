@@ -39,8 +39,14 @@ async function updateEntry(id, patch) {
   return toJson(r);
 }
 
-async function deleteEntry(id) {
-  const r = await fetch(`/api/entries?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+async function deleteEntry(id, options = {}) {
+  const params = new URLSearchParams();
+  if (options.hard) params.set('hard', '1');
+  const extra = params.toString();
+  const r = await fetch(
+    `/api/entries?id=${encodeURIComponent(id)}${extra ? `&${extra}` : ''}`,
+    { method: 'DELETE' },
+  );
   return toJson(r);
 }
 
@@ -144,6 +150,20 @@ async function deleteTestingFramework(id) {
   return toJson(r);
 }
 
+async function getGuidelines() {
+  const r = await fetch('/api/guidelines', { method: 'GET' });
+  return toJson(r);
+}
+
+async function saveGuidelinesRemote(body) {
+  const r = await fetch('/api/guidelines', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return toJson(r);
+}
+
 (async () => {
   const enabled = await pingServer();
   try {
@@ -168,6 +188,8 @@ async function deleteTestingFramework(id) {
         deleteTestingFramework,
         notify,
         logAudit,
+        getGuidelines,
+        saveGuidelines: saveGuidelinesRemote,
       });
       try {
         window.dispatchEvent(new CustomEvent('pm-api-ready', { detail: { enabled } }));

@@ -5,7 +5,7 @@ PM Dashboard (dugrowth/pm-dashboard)
 - `public/js/components/copyCheckSection.jsx` extracts the Copy Checker UI out of the HTML. The page aliases it as `CopyCheckSection` and falls back to the inline implementation if needed.
 - Cloudflare Pages Functions live under `functions/api/*`:
   - `copy-check.ts` → copy optimization endpoint (LLM-backed with strong post-validation)
-  - `entries.ts` → CRUD for scheduled content entries (D1-backed)
+- `entries.ts` → CRUD for scheduled content entries (D1-backed). `DELETE /api/entries?id=...&hard=1` performs a permanent removal; omit `hard` for soft-delete (`deletedAt` timestamp).
   - `ideas.ts` → CRUD for ideas (D1-backed)
   - `linkedin.ts` → CRUD for LinkedIn submissions (D1-backed)
   - `testing-frameworks.ts` → CRUD for testing frameworks (D1-backed)
@@ -66,4 +66,5 @@ Quality Tooling (optional)
 
 Notes
 - The copy-check function validates and normalizes LLM output and enforces hard constraints (character limits, URL preservation, banned/required phrases) even on fallback.
+- Content guidelines edited in the dashboard sync to the D1-backed `/api/guidelines` endpoint whenever the API client is reachable, with localStorage fallback for offline development.
 - DB SQL statements are wrapped in string literals to avoid TypeScript parse issues.
