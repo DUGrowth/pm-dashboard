@@ -5567,6 +5567,15 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         }));
         const [guidelines, setGuidelines] = useState(() => loadGuidelines());
         const [guidelinesOpen, setGuidelinesOpen] = useState(false);
+        const [deepLinkEntryId, setDeepLinkEntryId] = useState(() => {
+          if (typeof window === 'undefined') return '';
+          try {
+            const url = new URL(window.location.href);
+            return url.searchParams.get('entry') || '';
+          } catch {
+            return '';
+          }
+        });
 
         useEffect(() => {
           setEntries(loadEntries());
@@ -6230,6 +6239,25 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           });
           markNotificationsAsReadForEntry(latest.id, currentUser);
         }, [entries, viewingId, currentUser]);
+
+        const clearEntryQueryParam = () => {
+          try {
+            const url = new URL(window.location.href);
+            if (!url.searchParams.has('entry')) return;
+            url.searchParams.delete('entry');
+            window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+          } catch {}
+        };
+
+        useEffect(() => {
+          if (!deepLinkEntryId) return;
+          const existing = entries.find((entry) => entry.id === deepLinkEntryId);
+          if (existing) {
+            openEntry(deepLinkEntryId);
+            clearEntryQueryParam();
+            setDeepLinkEntryId('');
+          }
+        }, [deepLinkEntryId, entries]);
 
         const addEntry = (data) => {
           const timestamp = new Date().toISOString();
