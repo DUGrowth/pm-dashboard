@@ -6251,13 +6251,14 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
 
         useEffect(() => {
           if (!deepLinkEntryId) return;
+          if (currentView === 'login') return;
           const existing = entries.find((entry) => entry.id === deepLinkEntryId);
           if (existing) {
             openEntry(deepLinkEntryId);
             clearEntryQueryParam();
             setDeepLinkEntryId('');
           }
-        }, [deepLinkEntryId, entries]);
+        }, [deepLinkEntryId, entries, currentView]);
 
         const addEntry = (data) => {
           const timestamp = new Date().toISOString();
