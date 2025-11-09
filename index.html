@@ -6983,11 +6983,22 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                         className={cx(selectBaseClasses, "w-full px-4 py-3 text-sm")}
                       >
                         <option value="">Select your name</option>
-                        {userList.map((user) => (
-                          <option key={user} value={user}>
-                            {user}
-                          </option>
-                        ))}
+                        <optgroup label="Approvers">
+                          {approverList.map((name) => (
+                            <option key={`approver-${name}`} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Users">
+                          {userList
+                            .filter((user) => !approverList.includes(user))
+                            .map((user) => (
+                              <option key={`user-${user}`} value={user}>
+                                {user}
+                              </option>
+                            ))}
+                        </optgroup>
                       </select>
                   </div>
                   <Button
