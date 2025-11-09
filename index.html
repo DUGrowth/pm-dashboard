@@ -166,27 +166,16 @@
         "Conversion",
       ];
 
-      const ALL_PLATFORMS = [
-        "Instagram",
-        "Facebook",
-        "LinkedIn",
-        "X/Twitter",
-        "TikTok",
-        "YouTube",
-        "Threads",
-        "Pinterest",
-      ];
+      const ALL_PLATFORMS = ["Instagram", "Facebook", "LinkedIn", "BlueSky", "TikTok", "YouTube"];
 
       const DEFAULT_APPROVERS = ["Dan Davis", "Comms Lead", "Campaigns Manager", "Policy Lead"];
       const PLATFORM_DEFAULT_LIMITS = {
         Instagram: 2200,
         Facebook: 63206,
         LinkedIn: 3000,
-        "X/Twitter": 280,
+        BlueSky: 300,
         TikTok: 2200,
         YouTube: 5000,
-        Threads: 500,
-        Pinterest: 500,
       };
       const GUIDELINES_STORAGE_KEY = "content-guidelines-settings-v1";
       const DEFAULT_GUIDELINES = {
@@ -227,12 +216,11 @@
       const PLATFORM_IMAGES = {
         Instagram: "https://cdn.simpleicons.org/instagram/E4405F",
         Facebook: "https://cdn.simpleicons.org/facebook/1877F2",
-        LinkedIn: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCc+PHJlY3Qgd2lkdGg9JzI0JyBoZWlnaHQ9JzI0JyByeD0nNCcgZmlsbD0nJTIzMEE2NkMyJy8+PHBhdGggZmlsbD0nd2hpdGUnIGQ9J005LjE5IDE4LjVINi41NFY5Ljg4aDIuNjVWMTguNVptLTEuMzItOS44NGMtLjg1IDAtMS41My0uNjktMS41My0xLjUzcy42OC0xLjUzIDEuNTMtMS41MyAxLjUzLjY5IDEuNTMgMS41My0uNjggMS41My0xLjUzIDEuNTNabTExLjEzIDkuODRoLTIuNjR2LTQuNDJjMC0xLjA1LS4wMi0yLjQtMS40Ni0yLjQtMS40NiAwLTEuNjggMS4xNC0xLjY4IDIuMzJ2NC40OUgxMC4yVjkuODhoMi41M3YxLjE4aC4wNGMuMzUtLjY2IDEuMjEtMS4zNiAyLjQ5LTEuMzYgMi42NiAwIDMuMTYgMS43NSAzLjE2IDQuMDJ2NC43N1onLz48L3N2Zz4=",
-        "X/Twitter": "https://cdn.simpleicons.org/x",
+        LinkedIn:
+          "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAyNCAyNCc+PHJlY3Qgd2lkdGg9JzI0JyBoZWlnaHQ9JzI0JyByeD0nNCcgZmlsbD0nJTIzMEE2NkMyJy8+PHBhdGggZmlsbD0nd2hpdGUnIGQ9J005LjE5IDE4LjVINi41NFY5Ljg4aDIuNjVWMTguNVptLTEuMzItOS44NGMtLjg1IDAtMS41My0uNjktMS41My0xLjUzcy42OC0xLjUzIDEuNTMtMS41MyAxLjUzLjY5IDEuNTMgMS41My0uNjggMS41My0xLjUzIDEuNTNabTExLjEzIDkuODRoLTIuNjR2LTQuNDJjMC0xLjA1LS4wMi0yLjQtMS40Ni0yLjQtMS40NiAwLTEuNjggMS4xNC0xLjY4IDIuMzJ2NC40OUgxMC4yVjkuODhoMi41M3YxLjE4aC4wNGMuMzUtLjY2IDEuMjEtMS4zNiAyLjQ5LTEuMzYgMi42NiAwIDMuMTYgMS43NSAzLjE2IDQuMDJ2NC43N1onLz48L3N2Zz4=",
+        BlueSky: "https://cdn.simpleicons.org/bluesky/1A3B55",
         TikTok: "https://cdn.simpleicons.org/tiktok",
         YouTube: "https://cdn.simpleicons.org/youtube/FF0000",
-        Threads: "https://cdn.simpleicons.org/threads",
-        Pinterest: "https://cdn.simpleicons.org/pinterest/E60023",
       };
 
       const PLATFORM_TIPS = {
@@ -251,10 +239,10 @@
           "Write in short paragraphs for skim reading.",
           "End with a question to invite comments.",
         ],
-        "X/Twitter": [
-          "Stay under 240 characters when possible.",
-          "Use 1-2 hashtags max.",
-          "Lead with the strongest phrase; trim filler.",
+        BlueSky: [
+          "Stay conversational and lift the strongest statement up front.",
+          "Use a few hashtags and keep the tone welcoming.",
+          "End with a prompt to encourage replies.",
         ],
         TikTok: [
           "Hook viewers with a first sentence that matches the audio.",
@@ -266,74 +254,50 @@
           "Add timestamps or bullet points for longer videos.",
           "Encourage likes/subscribes in the final sentence.",
         ],
-        Threads: [
-          "Write like a friendly text message.",
-          "Keep lines short and emoji-friendly.",
-          "Invite quick replies with a direct prompt.",
-        ],
-        Pinterest: [
-          "Focus on outcomes and inspiration.",
-          "Use keywords that match board searches.",
-          "Finish with a link-friendly CTA.",
-        ],
       };
 
       const PM_PROFILE_IMAGE = "https://www.populationmatters.org/wp-content/uploads/2023/02/cropped-favicon-1-192x192.png";
       const PLATFORM_PREVIEW_META = {
         Instagram: {
           name: "Population Matters",
-          handle: "@populationmatters",
+          handle: "@popnmatters",
           accent: "#F56040",
-          profileUrl: "https://www.instagram.com/populationmatters/",
+          profileUrl: "https://www.instagram.com/popnmatters/",
           avatar: PM_PROFILE_IMAGE,
         },
         Facebook: {
           name: "Population Matters",
-          handle: "facebook.com/populationmatters",
+          handle: "facebook.com/PopulationMatters",
           accent: "#1877F2",
-          profileUrl: "https://www.facebook.com/populationmatters",
+          profileUrl: "https://www.facebook.com/PopulationMatters",
           avatar: PM_PROFILE_IMAGE,
         },
         LinkedIn: {
           name: "Population Matters",
-          handle: "Non-profit Organizations · Population Matters",
+          handle: "population matters",
           accent: "#0A66C2",
           profileUrl: "https://www.linkedin.com/company/population-matters/",
           avatar: PM_PROFILE_IMAGE,
         },
-        "X/Twitter": {
+        BlueSky: {
           name: "Population Matters",
-          handle: "@PopnMatters",
+          handle: "@popnmatters.bsky.social",
           accent: "#1D9BF0",
-          profileUrl: "https://twitter.com/PopnMatters",
-          avatar: PM_PROFILE_IMAGE,
-        },
-        TikTok: {
-          name: "Population Matters",
-          handle: "@populationmatters",
-          accent: "#EE1D52",
-          profileUrl: "https://www.tiktok.com/@populationmatters",
+          profileUrl: "https://bsky.app/profile/popnmatters.bsky.social",
           avatar: PM_PROFILE_IMAGE,
         },
         YouTube: {
           name: "Population Matters",
-          handle: "YouTube.com/PopulationMatters",
+          handle: "PopulationMatters",
           accent: "#FF0000",
-          profileUrl: "https://www.youtube.com/user/populationmatters",
+          profileUrl: "https://www.youtube.com/c/populationmatters",
           avatar: PM_PROFILE_IMAGE,
         },
-        Threads: {
+        TikTok: {
           name: "Population Matters",
-          handle: "@populationmatters",
-          accent: "#101010",
-          profileUrl: "https://www.threads.net/@populationmatters",
-          avatar: PM_PROFILE_IMAGE,
-        },
-        Pinterest: {
-          name: "Population Matters",
-          handle: "pinterest.co.uk/populationmatters",
-          accent: "#E60023",
-          profileUrl: "https://www.pinterest.co.uk/populationmatters/",
+          handle: "@PopulationMatters",
+          accent: "#EE1D52",
+          profileUrl: "https://www.tiktok.com/@PopulationMatters",
           avatar: PM_PROFILE_IMAGE,
         },
       };
@@ -416,9 +380,12 @@
         ALL_PLATFORMS.forEach((platform) => {
           add(platform, platform);
         });
-        add("twitter", "X/Twitter");
-        add("xtwitter", "X/Twitter");
-        add("x", "X/Twitter");
+        add("twitter", "BlueSky");
+        add("xtwitter", "BlueSky");
+        add("x", "BlueSky");
+        add("bluesky", "BlueSky");
+        add("blue sky", "BlueSky");
+        add("bsky", "BlueSky");
         add("linkedin", "LinkedIn");
         add("facebook", "Facebook");
         add("fb", "Facebook");
@@ -427,8 +394,6 @@
         add("tiktok", "TikTok");
         add("youtube", "YouTube");
         add("yt", "YouTube");
-        add("threads", "Threads");
-        add("pinterest", "Pinterest");
         return map;
       })();
 
@@ -3803,8 +3768,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                   will be stored exactly as they appear.
                 </li>
                 <li>
-                  Use one of the recognised platform names (Instagram, Facebook, LinkedIn, TikTok, YouTube, Threads,
-                  Pinterest, X/Twitter).
+                  Use one of the recognised platform names (Instagram, Facebook, LinkedIn, BlueSky, TikTok, YouTube).
                 </li>
               </ul>
             </div>
@@ -4674,7 +4638,11 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
       }
 
       function SocialPreview({ platform, caption, mediaUrl, isImage, isVideo }) {
-        const resolvedPlatform = platform === "Main" ? "LinkedIn" : platform;
+        const resolvedPlatform = (() => {
+          if (platform === "Main") return "LinkedIn";
+          if (platform === "X/Twitter") return "BlueSky";
+          return platform;
+        })();
         const meta = PLATFORM_PREVIEW_META[resolvedPlatform] || PLATFORM_PREVIEW_META.LinkedIn;
         const accent = meta.accent || "#2563eb";
         const prettyCaption = caption && caption.trim().length ? caption : "Your caption will appear here.";
@@ -4800,10 +4768,15 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             </div>
           </div>
         );
-        const renderTwitter = () => (
-          <div className="overflow-hidden rounded-2xl border border-[#2f3336] bg-black text-white shadow-sm">
+        const renderTwitter = (options = {}) => (
+          <div
+            className={cx(
+              "overflow-hidden rounded-2xl border shadow-sm",
+              options.customClassName ?? "border-[#2f3336] bg-black text-white",
+            )}
+          >
             {renderHeader({
-              wrapperClassName: "border-b border-[#2f3336] bg-black",
+              wrapperClassName: options.wrapperClassName ?? "border-b border-[#2f3336] bg-black",
               nameClassName: "text-white",
               handleClassName: "text-gray-400",
               avatarClassName: "border-[#2f3336]",
@@ -4811,7 +4784,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             })}
             <div className="space-y-3 px-4 py-3 text-sm">
               <p className="whitespace-pre-wrap">{prettyCaption}</p>
-              {renderMedia({ borderClass: "border-[#2f3336]", placeholderHeight: "h-64" })}
+              {renderMedia({ borderClass: options.borderClass ?? "border-[#2f3336]", placeholderHeight: options.placeholderHeight ?? "h-64" })}
             </div>
             <div className="flex items-center justify-between border-t border-[#2f3336] px-4 py-2 text-xs text-gray-400">
               <span>💬 12</span>
@@ -4873,29 +4846,6 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             </div>
           </div>
         );
-        const renderThreads = () => (
-          <div className="overflow-hidden rounded-2xl border border-graystone-200 bg-white shadow-sm">
-            {renderHeader({
-              nameClassName: "text-graystone-900",
-              handleClassName: "text-graystone-500",
-            })}
-            <div className="space-y-3 px-4 py-3">
-              <p className="whitespace-pre-wrap text-sm text-graystone-900">{prettyCaption}</p>
-              {renderMedia({ placeholderHeight: "h-40", roundedClass: "rounded-xl" })}
-            </div>
-          </div>
-        );
-        const renderPinterest = () => (
-          <div className="overflow-hidden rounded-2xl border border-graystone-200 bg-white shadow-sm">
-            {renderHeader({
-              rightContent: <button className="rounded-full bg-[#e60023] px-3 py-1 text-xs font-semibold text-white">Save</button>,
-            })}
-            <div className="px-4 pb-4 pt-2">
-              {renderMedia({ placeholderHeight: "h-80", roundedClass: "rounded-3xl" })}
-              <p className="mt-3 whitespace-pre-wrap text-sm text-graystone-800">{prettyCaption}</p>
-            </div>
-          </div>
-        );
         const renderDefault = () => (
           <div className="overflow-hidden rounded-2xl border border-graystone-200 bg-white shadow-sm">
             {renderHeader()}
@@ -4911,18 +4861,14 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             return renderLinkedIn();
           case "Instagram":
             return renderInstagram();
-          case "X/Twitter":
-            return renderTwitter();
+          case "BlueSky":
+            return renderTwitter({ customClassName: "overflow-hidden rounded-2xl border border-[#2a5bc2] bg-[#0c1f41] text-white shadow-sm" });
           case "Facebook":
             return renderFacebook();
           case "TikTok":
             return renderTikTok();
           case "YouTube":
             return renderYouTube();
-          case "Threads":
-            return renderThreads();
-          case "Pinterest":
-            return renderPinterest();
           default:
             return renderDefault();
         }
