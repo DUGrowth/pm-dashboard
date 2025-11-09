@@ -20,10 +20,11 @@
       try {
         for (const platform of selectedPlatforms) {
           const maxChars = safeGuidelines?.charLimits?.[platform] ?? 280;
-          const payload = {
-            text: getPlatformCaption(caption, platformCaptions, platform),
-            platform,
-            assetType,
+      const effectiveAssetType = assetType === 'No asset' ? 'Design' : assetType;
+      const payload = {
+        text: getPlatformCaption(caption, platformCaptions, platform),
+        platform,
+        assetType: effectiveAssetType,
             readingLevelTarget: 'Grade 7',
             constraints: { maxChars, maxHashtags: 10, requireCTA: true },
             brand: {
@@ -133,4 +134,3 @@
     );
   };
 })();
-

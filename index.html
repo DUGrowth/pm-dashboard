@@ -138,10 +138,11 @@
     <script type="text/babel" data-presets="env,react">
       const { useState, useMemo, useEffect } = React;
 
-      const ASSET_TYPES = ["Video", "Design", "Carousel"];
+      const ASSET_TYPES = ["No asset", "Video", "Design", "Carousel"];
       const IDEA_TYPES = ["Topic", "Theme", "Series", "Campaign", "Other"];
       const KANBAN_STATUSES = [
         "Draft",
+        "Approval required",
         "Awaiting brand approval",
         "Awaiting SME approval",
         "Awaiting visual",
@@ -168,7 +169,7 @@
 
       const ALL_PLATFORMS = ["Instagram", "Facebook", "LinkedIn", "BlueSky", "TikTok", "YouTube"];
 
-      const DEFAULT_APPROVERS = ["Dan Davis", "Comms Lead", "Campaigns Manager", "Policy Lead"];
+      const DEFAULT_APPROVERS = ["Jameen Kaur", "Emma Lewendon-Strutt", "Josh Hill", "Shweta Shirodkar", "Dan Davis"];
       const PLATFORM_DEFAULT_LIMITS = {
         Instagram: 2200,
         Facebook: 63206,
@@ -187,8 +188,9 @@
         teamsWebhookUrl: "",
       };
 
-      const USERS = [
+      const DEFAULT_USERS = [
         "Dan Davis",
+        "Francesca Harrison",
         "Comms Lead",
         "Campaigns Manager",
         "Policy Lead",
@@ -309,6 +311,40 @@
       const LINKEDIN_STORAGE_KEY = "pm-content-dashboard-linkedin";
       const TESTING_STORAGE_KEY = "pm-content-dashboard-testing";
       const storageAvailable = typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+      const APPROVER_STORAGE_KEY = "pm-dashboard-approvers-v1";
+      const USER_LIST_STORAGE_KEY = "pm-dashboard-users-v1";
+      const loadApprovers = () => {
+        if (!storageAvailable) return DEFAULT_APPROVERS;
+        try {
+          const raw = window.localStorage.getItem(APPROVER_STORAGE_KEY);
+          if (!raw) return DEFAULT_APPROVERS;
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length) return parsed;
+        } catch {}
+        return DEFAULT_APPROVERS;
+      };
+      const saveApprovers = (next) => {
+        if (!storageAvailable) return;
+        try {
+          window.localStorage.setItem(APPROVER_STORAGE_KEY, JSON.stringify(next));
+        } catch {}
+      };
+      const loadUsers = () => {
+        if (!storageAvailable) return DEFAULT_USERS;
+        try {
+          const raw = window.localStorage.getItem(USER_LIST_STORAGE_KEY);
+          if (!raw) return DEFAULT_USERS;
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length) return parsed;
+        } catch {}
+        return DEFAULT_USERS;
+      };
+      const saveUsers = (next) => {
+        if (!storageAvailable) return;
+        try {
+          window.localStorage.setItem(USER_LIST_STORAGE_KEY, JSON.stringify(next));
+        } catch {}
+      };
 
       const cx = (...xs) => xs.filter(Boolean).join(" ");
   const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
@@ -319,6 +355,13 @@
   const isoFromParts = (year, monthIndex, day) =>
     `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
       const ensureArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
+      const determineWorkflowStatus = ({ approvers = [], assetType = "No asset", previewUrl = "" }) => {
+        const hasApprovers = Array.isArray(approvers) && approvers.length > 0;
+        const needsVisual =
+          assetType && assetType !== "No asset" && !(previewUrl && String(previewUrl).trim());
+        if (hasApprovers || needsVisual) return "Approval required";
+        return "Draft";
+      };
 
       const createEmptyChecklist = () => {
         const checklist = {};
@@ -1880,14 +1923,14 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         };
         return (
           <div className="relative">
-            <Button
-              variant="outline"
-              className="w-full justify-between px-4 py-2"
-              onClick={() => setOpen((prev) => !prev)}
-            >
-              <span className="text-sm">
-                {value.length ? `${value.length} selected` : placeholder}
-              </span>
+              <Button
+                variant="outline"
+                className="w-full justify-between px-4 py-2 dropdown-font"
+                onClick={() => setOpen((prev) => !prev)}
+              >
+                <span className="dropdown-font text-sm">
+                  {value.length ? `${value.length} selected` : placeholder}
+                </span>
               <ChevronDownIcon className="h-4 w-4" />
             </Button>
             {open && (
@@ -1936,12 +1979,12 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         />
       );
 
-      const ApproverMulti = ({ value, onChange }) => (
+      const ApproverMulti = ({ value, onChange, options = DEFAULT_APPROVERS }) => (
         <MultiSelect
           placeholder="Select approvers"
           value={value}
           onChange={onChange}
-          options={DEFAULT_APPROVERS.map((name) => ({
+          options={options.map((name) => ({
             value: name,
             label: name,
           }))}
@@ -1979,16 +2022,17 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         onPreviewAssetType,
         guidelines = DEFAULT_GUIDELINES,
         currentUser = "",
+        approverOptions = DEFAULT_APPROVERS,
       }) {
         const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
         const [approvers, setApprovers] = useState([]);
-        const [author, setAuthor] = useState("");
+        const [author, setAuthor] = useState(currentUser || "");
         const [platforms, setPlatforms] = useState([]);
         const [allPlatforms, setAllPlatforms] = useState(false);
         const [caption, setCaption] = useState("");
         const [url, setUrl] = useState("");
         const [approvalDeadline, setApprovalDeadline] = useState("");
-        const [assetType, setAssetType] = useState("Design");
+        const [assetType, setAssetType] = useState("No asset");
         const [script, setScript] = useState("");
         const [designCopy, setDesignCopy] = useState("");
         const [slidesCount, setSlidesCount] = useState(3);
@@ -1999,10 +2043,10 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [platformCaptions, setPlatformCaptions] = useState({});
         const [activeCaptionTab, setActiveCaptionTab] = useState("Main");
         const [activePreviewPlatform, setActivePreviewPlatform] = useState("Main");
-        const [workflowStatus, setWorkflowStatus] = useState(KANBAN_STATUSES[0]);
         const [campaign, setCampaign] = useState("");
         const [contentPillar, setContentPillar] = useState("");
         const [testingFrameworkId, setTestingFrameworkId] = useState("");
+        const [entryFormErrors, setEntryFormErrors] = useState([]);
 
         const dayOptions = useMemo(() => {
           const total = daysInMonth(monthCursor.getFullYear(), monthCursor.getMonth());
@@ -2021,7 +2065,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         }, [allPlatforms]);
 
         useEffect(() => {
-          onPreviewAssetType?.(assetType || null);
+          onPreviewAssetType?.(assetType === "No asset" ? null : assetType);
         }, [assetType, onPreviewAssetType]);
 
         useEffect(() => {
@@ -2061,16 +2105,20 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           setActivePreviewPlatform((prev) => (prev === "Main" || platforms.includes(prev) ? prev : platforms[0] || "Main"));
         }, [platforms]);
 
+        useEffect(() => {
+          if (currentUser) setAuthor(currentUser);
+        }, [currentUser]);
+
         const reset = () => {
           setApprovers([]);
-          setAuthor("");
+          setAuthor(currentUser || "");
           setPlatforms([]);
           setAllPlatforms(false);
           setCaption("");
           setUrl("");
           setApprovalDeadline("");
           setPreviewUrl("");
-          setAssetType("Design");
+          setAssetType("No asset");
           setScript("");
           setDesignCopy("");
           setSlidesCount(3);
@@ -2080,11 +2128,27 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           setPlatformCaptions({});
           setActiveCaptionTab("Main");
           setActivePreviewPlatform("Main");
-          setWorkflowStatus(KANBAN_STATUSES[0]);
           setCampaign("");
           setContentPillar("");
           setTestingFrameworkId("");
+          setEntryFormErrors([]);
           onPreviewAssetType?.(null);
+        };
+
+        const validateEntry = () => {
+          const errors = [];
+          if (!date) errors.push("Date is required.");
+          const resolvedPlatforms = allPlatforms ? [...ALL_PLATFORMS] : platforms;
+          if (!resolvedPlatforms.length) errors.push("At least one platform is required.");
+          if (!assetType) errors.push("Asset type is required.");
+          if (assetType === "Video" && !script.trim()) errors.push("Video script is required.");
+          if (assetType === "Design" && !designCopy.trim()) errors.push("Design copy is required.");
+          if (
+            assetType === "Carousel" &&
+            !carouselSlides.some((slide) => typeof slide === "string" && slide.trim())
+          )
+            errors.push("At least one carousel slide needs copy.");
+          return errors;
         };
 
         const submitEntry = () => {
@@ -2109,25 +2173,37 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             carouselSlides: assetType === "Carousel" ? carouselSlides : undefined,
             firstComment,
             platformCaptions: cleanedCaptions,
-            workflowStatus,
             campaign: campaign || undefined,
             contentPillar: contentPillar || undefined,
             testingFrameworkId: testingFrameworkId || undefined,
             testingFrameworkName: selectedFramework ? selectedFramework.name : undefined,
+            workflowStatus: determineWorkflowStatus({ approvers, assetType, previewUrl }),
           });
           reset();
         };
 
         const handleSubmit = (event) => {
           event.preventDefault();
+          const errors = validateEntry();
+          if (errors.length) {
+            setEntryFormErrors(errors);
+            return;
+          }
           if (hasConflict && !overrideConflict) {
             return;
           }
+          setEntryFormErrors([]);
           submitEntry();
         };
 
         const handleSubmitAnyway = () => {
+          const errors = validateEntry();
+          if (errors.length) {
+            setEntryFormErrors(errors);
+            return;
+          }
           setOverrideConflict(true);
+          setEntryFormErrors([]);
           submitEntry();
         };
 
@@ -2182,6 +2258,16 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               <CardTitle className="text-xl text-ocean-900">Create Content</CardTitle>
             </CardHeader>
       <CardContent>
+        {entryFormErrors.length ? (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            <div className="text-xs font-semibold uppercase tracking-wide text-rose-600">Please fix before saving</div>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {entryFormErrors.map((error) => (
+                <li key={error}>{error}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         <form className="space-y-6" onSubmit={handleSubmit}>
           <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
             <div className="space-y-6">
@@ -2216,21 +2302,6 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 <p className="text-xs text-graystone-500">
                   Let approvers know when you need a decision by (optional).
                 </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Workflow status</Label>
-                <select
-                  value={workflowStatus}
-                  onChange={(event) => setWorkflowStatus(event.target.value)}
-                  className={cx(selectBaseClasses, "w-full")}
-                >
-                  {KANBAN_STATUSES.map((statusOption) => (
-                    <option key={statusOption} value={statusOption}>
-                      {statusOption}
-                    </option>
-                  ))}
-                </select>
               </div>
 
               <div className="space-y-2">
@@ -2288,7 +2359,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
 
               <div className="space-y-2">
                 <Label>Approvers</Label>
-                <ApproverMulti value={approvers} onChange={setApprovers} />
+                <ApproverMulti value={approvers} onChange={setApprovers} options={approverOptions} />
               </div>
 
               <div className="space-y-2">
@@ -2471,15 +2542,16 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
 
               <div className="space-y-2">
                 <Label>Asset type</Label>
-                <select
-                  value={assetType}
-                  onChange={(event) => setAssetType(event.target.value)}
-                  className={cx(selectBaseClasses, "w-full")}
-                >
-                  <option value="Video">Video</option>
-                  <option value="Design">Design</option>
-                  <option value="Carousel">Carousel</option>
-                </select>
+                    <select
+                      value={assetType}
+                      onChange={(event) => setAssetType(event.target.value)}
+                      className={cx(selectBaseClasses, "w-full")}
+                    >
+                      <option value="No asset">No asset</option>
+                      <option value="Video">Video</option>
+                      <option value="Design">Design</option>
+                      <option value="Carousel">Carousel</option>
+                    </select>
               </div>
 
               {assetType === "Video" && (
@@ -4884,6 +4956,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         onUpdate,
         onNotifyMentions,
         testingFrameworks = [],
+        approverOptions = DEFAULT_APPROVERS,
+        users = DEFAULT_USERS,
       }) {
         const sanitizedEntry = useMemo(() => sanitizeEntry(entry), [entry]);
         const [draft, setDraft] = useState(sanitizedEntry);
@@ -5010,6 +5084,12 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
 
         const handleSave = () => {
           let next = normalizeEntry(draft);
+          const computedStatus = determineWorkflowStatus({
+            approvers: next.approvers,
+            assetType: next.assetType,
+            previewUrl: next.previewUrl,
+          });
+          next = { ...next, workflowStatus: computedStatus };
           if (next.status === "Approved") {
             next = normalizeEntry({ ...next, status: "Pending", approvedAt: undefined });
           }
@@ -5095,8 +5175,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           const mentionDirectory = Array.from(
             new Set(
               [
-                ...DEFAULT_APPROVERS,
-                ...USERS,
+                ...approverOptions,
+                ...users,
                 ...(draft.approvers || []),
                 draft.author,
               ]
@@ -5377,22 +5457,12 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                   <Input type="date" value={draft.date} onChange={(event) => update("date", event.target.value)} />
                 </FieldRow>
 
-                <FieldRow label="Workflow status">
-                  <select
-                    value={draft.workflowStatus || KANBAN_STATUSES[0]}
-                    onChange={(event) => update("workflowStatus", event.target.value)}
-                    className={cx(selectBaseClasses, "w-full")}
-                  >
-                    {KANBAN_STATUSES.map((statusOption) => (
-                      <option key={statusOption} value={statusOption}>
-                        {statusOption}
-                      </option>
-                    ))}
-                  </select>
-                </FieldRow>
-
                 <FieldRow label="Approvers">
-                  <ApproverMulti value={draft.approvers || []} onChange={(value) => update("approvers", value)} />
+                  <ApproverMulti
+                    value={draft.approvers || []}
+                    onChange={(value) => update("approvers", value)}
+                    options={approverOptions}
+                  />
                 </FieldRow>
 
                 <FieldRow label="Campaign">
@@ -5683,6 +5753,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                     onChange={(event) => handleAssetTypeChange(event.target.value)}
                     className={cx(selectBaseClasses, "w-full")}
                   >
+                    <option value="No asset">No asset</option>
                     <option value="Video">Video</option>
                     <option value="Design">Design</option>
                     <option value="Carousel">Carousel</option>
@@ -5852,6 +5923,10 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         }));
         const [guidelines, setGuidelines] = useState(() => loadGuidelines());
         const [guidelinesOpen, setGuidelinesOpen] = useState(false);
+        const [approverList, setApproverList] = useState(() => loadApprovers());
+        const [newApproverName, setNewApproverName] = useState("");
+        const [userList, setUserList] = useState(() => loadUsers());
+        const [newUserName, setNewUserName] = useState("");
         const [deepLinkEntryId, setDeepLinkEntryId] = useState(() => {
           if (typeof window === 'undefined') return '';
           try {
@@ -5861,6 +5936,30 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             return '';
           }
         });
+        useEffect(() => {
+          saveApprovers(approverList);
+        }, [approverList]);
+        useEffect(() => {
+          saveUsers(userList);
+        }, [userList]);
+        const addApprover = () => {
+          const next = newApproverName.trim();
+          if (!next) return;
+          setApproverList((prev) => (prev.includes(next) ? prev : [...prev, next]));
+          setNewApproverName("");
+        };
+        const removeApprover = (name) => {
+          setApproverList((prev) => prev.filter((item) => item !== name));
+        };
+        const addUser = () => {
+          const next = newUserName.trim();
+          if (!next) return;
+          setUserList((prev) => (prev.includes(next) ? prev : [...prev, next]));
+          setNewUserName("");
+        };
+        const removeUser = (name) => {
+          setUserList((prev) => prev.filter((item) => item !== name));
+        };
 
         useEffect(() => {
           setEntries(loadEntries());
@@ -6877,19 +6976,19 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                     <Label className="text-sm text-graystone-600" htmlFor="login-user">
                       Who&apos;s working?
                     </Label>
-                    <select
-                      id="login-user"
-                      value={userSelection}
-                      onChange={(event) => setUserSelection(event.target.value)}
-                      className={cx(selectBaseClasses, "w-full px-4 py-3 text-sm")}
-                    >
-                      <option value="">Select your name</option>
-                      {USERS.map((user) => (
-                        <option key={user} value={user}>
-                          {user}
-                        </option>
-                      ))}
-                    </select>
+                      <select
+                        id="login-user"
+                        value={userSelection}
+                        onChange={(event) => setUserSelection(event.target.value)}
+                        className={cx(selectBaseClasses, "w-full px-4 py-3 text-sm")}
+                      >
+                        <option value="">Select your name</option>
+                        {userList.map((user) => (
+                          <option key={user} value={user}>
+                            {user}
+                          </option>
+                        ))}
+                      </select>
                   </div>
                   <Button
                     type="submit"
@@ -7384,16 +7483,17 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
 
                 <div className="grid gap-6 lg:grid-cols-[minmax(0,1.8fr)_minmax(260px,1fr)]">
                   <div className="w-full">
-                    <EntryForm
-                      key={startISO}
-                      monthCursor={monthCursor}
-                      onSubmit={addEntry}
-                      existingEntries={entries.filter((entry) => !entry.deletedAt)}
-                      testingFrameworks={testingFrameworks}
-                      onPreviewAssetType={setPendingAssetType}
-                      guidelines={guidelines}
-                      currentUser={currentUser}
-                    />
+                <EntryForm
+                  key={startISO}
+                  monthCursor={monthCursor}
+                  onSubmit={addEntry}
+                  existingEntries={entries.filter((entry) => !entry.deletedAt)}
+                  testingFrameworks={testingFrameworks}
+                  onPreviewAssetType={setPendingAssetType}
+                  guidelines={guidelines}
+                  currentUser={currentUser}
+                  approverOptions={approverList}
+                />
                   </div>
                   <div className="flex w-full flex-col gap-6">
                     <MiniCalendar monthCursor={monthCursor} entries={monthEntries} onOpenEntry={openEntry} />
@@ -7942,6 +8042,82 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                     )}
                   </CardContent>
                 </Card>
+                <Card className="shadow-xl">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-ocean-900">Approver directory</CardTitle>
+                    <p className="mt-2 text-sm text-graystone-500">
+                      Add or remove approvers; these names feed the approvals experience.
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {approverList.length ? (
+                        approverList.map((name) => (
+                          <div
+                            key={name}
+                            className="flex items-center justify-between rounded-xl border border-graystone-200 bg-white px-3 py-2 text-sm text-graystone-700"
+                          >
+                            <span>{name}</span>
+                            <Button variant="ghost" size="sm" onClick={() => removeApprover(name)}>
+                              Remove
+                            </Button>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-xs text-graystone-500">No approvers configured yet.</p>
+                      )}
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <Input
+                        placeholder="Add approver name"
+                        value={newApproverName}
+                        onChange={(event) => setNewApproverName(event.target.value)}
+                        className="flex-1"
+                      />
+                      <Button onClick={addApprover} disabled={!newApproverName.trim()}>
+                        Add approver
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="shadow-xl">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-ocean-900">User roster</CardTitle>
+                    <p className="mt-2 text-sm text-graystone-500">
+                      Manage the names that show up during login.
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {userList.length ? (
+                        userList.map((name) => (
+                          <div
+                            key={name}
+                            className="flex items-center justify-between rounded-xl border border-graystone-200 bg-white px-3 py-2 text-sm text-graystone-700"
+                          >
+                            <span>{name}</span>
+                            <Button variant="ghost" size="sm" onClick={() => removeUser(name)}>
+                              Remove
+                            </Button>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-xs text-graystone-500">No users configured yet.</p>
+                      )}
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <Input
+                        placeholder="Add user name"
+                        value={newUserName}
+                        onChange={(event) => setNewUserName(event.target.value)}
+                        className="flex-1"
+                      />
+                      <Button onClick={addUser} disabled={!newUserName.trim()}>
+                        Add user
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
             )}
 
@@ -8013,17 +8189,19 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               </div>
             )}
             {viewingSnapshot ? (
-              <EntryModal
-                entry={viewingSnapshot}
-                currentUser={currentUser}
-                onClose={closeEntry}
-                onApprove={toggleApprove}
-                onDelete={softDelete}
-                onSave={upsert}
-                onUpdate={upsert}
-                onNotifyMentions={handleMentionNotifications}
-                testingFrameworks={testingFrameworks}
-              />
+            <EntryModal
+              entry={viewingSnapshot}
+              currentUser={currentUser}
+              onClose={closeEntry}
+              onApprove={toggleApprove}
+              onDelete={softDelete}
+              onSave={upsert}
+              onUpdate={upsert}
+              onNotifyMentions={handleMentionNotifications}
+              testingFrameworks={testingFrameworks}
+              approverOptions={approverList}
+              users={userList}
+            />
             ) : null}
             <ApprovalsModal
               open={approvalsModalOpen}

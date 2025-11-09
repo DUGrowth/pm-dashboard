@@ -45,7 +45,7 @@ Local Development
    - Or override endpoint: `ENDPOINT=http://localhost:8788/api/copy-check node tools/test-copy-check.mjs`
 
 Admin tools
-- From the Menu, open “Admin tools” to view recent audit events. The view fetches from the server when connected, with a local fallback.
+- From the Menu, open “Admin tools” to view recent audit events. The view fetches from the server when connected, with a local fallback, and it now also lets you add/remove approvers and dashboard users (Francesca Harrison is listed by default).
 
 D1 schema
 - A minimal schema is provided in `schema.sql`.
@@ -66,5 +66,6 @@ Quality Tooling (optional)
 
 Notes
 - The copy-check function validates and normalizes LLM output and enforces hard constraints (character limits, URL preservation, banned/required phrases) even on fallback.
+- Calendar entries now require a date, at least one platform, and an asset type (a “No asset” option is available). Choosing Video/Design/Carousel enforces the matching copy fields, and the workflow status automatically marks the work as “Approval required” when approvers are assigned or visual assets are pending.
 - Content guidelines edited in the dashboard sync to the D1-backed `/api/guidelines` endpoint whenever the API client is reachable, with localStorage fallback for offline development.
 - DB SQL statements are wrapped in string literals to avoid TypeScript parse issues.
