@@ -20,8 +20,29 @@ const PLATFORMS = new Set([
   'YouTube',
   'Threads',
   'Pinterest',
+  'BlueSky',
 ]);
 const ASSET_TYPES = new Set(['Video', 'Design', 'Carousel']);
+
+const PLATFORM_PROMPTS: Record<string, string> = {
+  Facebook: `Facebook Page copy check. Front-load value in the first 80 characters. One post = one job (comments, shares, or clicks—pick one) with a single, specific CTA. Avoid engagement/click bait and unoriginal reposts; if resharing, add unique commentary. Prefer clear language; 0–3 hashtags max. Cite credible sources inline when using stats. Prompt meaningful discussion with a concrete question (not “What do you think?”). Accessibility: require alt text for images and captions for video. Deliver the core insight natively before any link. Population Matters: people-first, solution-oriented framing—avoid doom.`,
+  LinkedIn: `LinkedIn Company Page copy check. Line 1 must state a clear claim/insight; follow with 3–5 short, scannable lines that teach one practical thing. Include a credible stat/source inline. Use one precise practitioner CTA. Prefer native value; if a link exists, place it after delivering value (or recommend first-comment placement)—never lead with a naked link. Suggest a Document (carousel) if the draft tries to explain multiple points. Accessibility: require alt text/captions. Tone: plain, professional, zero fluff. Population Matters: evidence-led, human impact first.`,
+  Instagram: `Instagram caption check. Hook + human stake in the first 1–2 lines. Write for followers first; for reach, suggest Collab tags and creator mentions over hashtag spam. Use natural-language keywords in the caption; keep hashtags focused (0–5 relevant). Deliver the gist natively (link in bio/sticker if needed). CTA should drive saves, specific comments, or DMs. Accessibility: alt text mandatory; subtitles/on-screen text for Reels. Population Matters: stories + solutions; keep numbers transparent and sourced.`,
+  YouTube: `YouTube copy check (titles, descriptions, hashtags, Community). Title: ≤70 characters, benefit + specific context + light curiosity; include the primary keyword naturally. Description: first 150–200 characters must summarize the payoff and include key terms; then bullets/chapters. Hashtags: 1–3 relevant (avoid >15). Recommend pinning a top comment with sources/links if the description is dense. Community posts: teach one thing in 2–4 short lines + single qualified question. CTA must match intent (watch next, comment, subscribe). Accessibility: captions required. Population Matters: evidence + outcomes, not sensationalism.`,
+  TikTok: `TikTok caption check. Verify in-app caption allowance on publish; regardless, the first line must carry the hook. Pair on-screen text + spoken hook with a caption that gives one line of context and 3–5 natural-language search phrases (“how to…”, “why X…”). Avoid hashtag clouds and engagement bait. Use a clear CTA (e.g., ask for a specific keyword in comments if you’ll follow up). Ensure auto-captions are on; respect safe zones for text overlays. Population Matters: human stories, practical solutions, transparent sources when citing stats.`,
+  BlueSky: `Bluesky post check. 300-character hard cap: one idea, strong verb, one proof point. If more is required, recommend a deliberate thread (1/?, 2/?). Avoid hashtag clutter; use proper nouns/keywords in plain text. If images are referenced, require alt text. End with a concrete question or pointer when discussion is the goal. Population Matters: people-centred framing; clarity over cleverness.`,
+};
+
+const BASE_SYSTEM_PROMPT =
+  'You are a senior copy editor for a social impact organization. Optimize for clarity, brevity, action, and platform fit.\n' +
+  'Respect HARD CONSTRAINTS: do not exceed character limits; do not change URLs; include REQUIRED PHRASES; remove BANNED WORDS.\n' +
+  'Preserve meaning and factual content. Return ONLY strict JSON with keys: score, flags, suggestion, variants, explanations. No extra text or markdown.\n' +
+  'If constraints are impossible, produce the closest valid text and list violations in flags.';
+
+const getSystemPrompt = (platform: string) => {
+  const platformPrompt = PLATFORM_PROMPTS[platform] || '';
+  return platformPrompt ? `${BASE_SYSTEM_PROMPT}\n${platformPrompt}` : BASE_SYSTEM_PROMPT;
+};
 
 // Simple token-bucket RL per IP
 const RL = new Map<string, { tokens: number; ts: number }>();
@@ -180,11 +201,7 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: a
     return ok(withFallbackMeta(fb));
   }
 
-  const SYSTEM_PROMPT =
-    'You are a senior copy editor for a social impact organization. Optimize for clarity, brevity, action, and platform fit.\n' +
-    'Respect HARD CONSTRAINTS: do not exceed character limits; do not change URLs; include REQUIRED PHRASES; remove BANNED WORDS.\n' +
-    'Preserve meaning and factual content. Return ONLY strict JSON with keys: score, flags, suggestion, variants, explanations. No extra text or markdown.\n' +
-    'If constraints are impossible, produce the closest valid text and list violations in flags.';
+  const systemPrompt = getSystemPrompt(b.platform);
 
   const schema = JSON.stringify({
     score: {
@@ -214,7 +231,7 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: a
         model: OPENAI_MODEL,
         temperature: 0.3,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: systemPrompt },
           { role: 'user', content: prompt },
         ],
       }),
@@ -243,7 +260,7 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: a
           model: OPENAI_MODEL,
           temperature: 0.25,
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: systemPrompt },
             { role: 'user', content: `${prompt}\nReturn ONLY strict JSON matching the schema.` },
           ],
         }),

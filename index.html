@@ -198,6 +198,20 @@
         { name: "Social Lead", email: "" },
       ];
 
+      const normalizeEmail = (value) => {
+        if (!value) return "";
+        return String(value).trim().toLowerCase();
+      };
+
+      const USER_CREDENTIALS_STORAGE_KEY = "pm-dashboard-user-credentials-v1";
+
+      const INITIAL_CREDENTIALS = DEFAULT_USERS.reduce((acc, user) => {
+        const key = normalizeEmail(user.email || user.name);
+        if (!key) return acc;
+        acc[key] = { name: user.name, email: user.email || "", needsSetup: true };
+        return acc;
+      }, {});
+
       const WORKFLOW_STAGES = [
         "Briefing",
         "Production",
@@ -313,6 +327,45 @@
       const storageAvailable = typeof window !== "undefined" && typeof window.localStorage !== "undefined";
       const APPROVER_STORAGE_KEY = "pm-dashboard-approvers-v1";
       const USER_LIST_STORAGE_KEY = "pm-dashboard-users-v1";
+      const hashString = async (value) => {
+        if (!value) return "";
+        const hasSubtle = typeof crypto?.subtle?.digest === "function";
+        if (hasSubtle) {
+          try {
+            const data = new TextEncoder().encode(value);
+            const digest = await crypto.subtle.digest("SHA-256", data);
+            return Array.from(new Uint8Array(digest))
+              .map((byte) => byte.toString(16).padStart(2, "0"))
+              .join("");
+          } catch {
+            // fall through to fallback below
+          }
+        }
+        return `raw:${value}`;
+      };
+      const loadUserCredentials = () => {
+        if (!storageAvailable) return { ...INITIAL_CREDENTIALS };
+        try {
+          const raw = window.localStorage.getItem(USER_CREDENTIALS_STORAGE_KEY);
+          if (!raw) return { ...INITIAL_CREDENTIALS };
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== "object") return { ...INITIAL_CREDENTIALS };
+          return { ...INITIAL_CREDENTIALS, ...parsed };
+        } catch {
+          return { ...INITIAL_CREDENTIALS };
+        }
+      };
+      const saveUserCredentials = (payload) => {
+        if (!storageAvailable) return;
+        try {
+          window.localStorage.setItem(USER_CREDENTIALS_STORAGE_KEY, JSON.stringify(payload));
+        } catch {}
+      };
+      const verifyPassword = async (password, storedHash) => {
+        if (!storedHash) return false;
+        const hashed = await hashString(password);
+        return hashed === storedHash;
+      };
       const loadApprovers = () => {
         if (!storageAvailable) return DEFAULT_APPROVERS;
         try {
@@ -5909,9 +5962,11 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [currentUser, setCurrentUser] = useState(() =>
           storageAvailable ? window.localStorage.getItem(USER_STORAGE_KEY) : null
         );
-        const [userSelection, setUserSelection] = useState(() =>
-          storageAvailable ? window.localStorage.getItem(USER_STORAGE_KEY) || "" : ""
-        );
+        const [loginEmail, setLoginEmail] = useState("");
+        const [loginPassword, setLoginPassword] = useState("");
+        const [loginPasswordConfirm, setLoginPasswordConfirm] = useState("");
+        const [loginError, setLoginError] = useState("");
+        const [userCredentials, setUserCredentials] = useState(() => loadUserCredentials());
         const [currentView, setCurrentView] = useState(() => {
           if (storageAvailable) {
             return window.localStorage.getItem(USER_STORAGE_KEY) ? "menu" : "login";
@@ -5954,10 +6009,35 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         useEffect(() => {
           saveUsers(userList);
         }, [userList]);
+        useEffect(() => {
+          saveUserCredentials(userCredentials);
+        }, [userCredentials]);
+        useEffect(() => {
+          setUserCredentials((prev) => {
+            let mutated = false;
+            const next = { ...prev };
+            userList.forEach((user) => {
+              const key = normalizeEmail(user.email || user.name);
+              if (!key) return;
+              const existing = next[key];
+              if (!existing) {
+                next[key] = { name: user.name, email: user.email || "", needsSetup: true };
+                mutated = true;
+              } else if (
+                existing.name !== user.name ||
+                existing.email !== (user.email || "")
+              ) {
+                next[key] = { ...existing, name: user.name, email: user.email || "" };
+                mutated = true;
+              }
+            });
+            return mutated ? next : prev;
+          });
+        }, [userList]);
         const sendNewUserEmail = (user) => {
           if (!user || !user.email) return;
           const subject = "PM Dashboard access granted";
-          const text = `Hi ${user.name},\n\nYou've been added to the Population Matters PM Dashboard. Visit ${window.location.origin} to log in with your name and collaborate.\n\nIf you weren't expecting this, please reach out to the comms team.`;
+          const text = `Hi ${user.name},\n\nYou've been invited to the Population Matters PM Dashboard. Visit ${window.location.origin}, enter ${user.email}, and follow the prompts to set a password before jumping in.\n\nIf you weren't expecting this, please reach out to the comms team.`;
           if (window.api && window.api.enabled && window.api.notify) {
             window.api
               .notify({ to: [user.email], subject, text })
@@ -5982,18 +6062,41 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           const email = newUserEmail.trim();
           if (!first || !last || !email) return;
           const fullname = `${first} ${last}`;
+          const normalizedEmail = normalizeEmail(email);
           setUserList((prev) => {
-            if (prev.some((user) => user.name === fullname)) return prev;
+            if (
+              prev.some(
+                (user) =>
+                  user.name === fullname ||
+                  normalizeEmail(user.email || user.name) === normalizedEmail
+              )
+            )
+              return prev;
             const next = [...prev, { name: fullname, email }];
             sendNewUserEmail({ name: fullname, email });
             return next;
           });
+          if (normalizedEmail) {
+            setUserCredentials((prev) => {
+              const next = { ...prev };
+              next[normalizedEmail] = { name: fullname, email, needsSetup: true };
+              return next;
+            });
+          }
           setNewUserFirst("");
           setNewUserLast("");
           setNewUserEmail("");
         };
-        const removeUser = (name) => {
-          setUserList((prev) => prev.filter((item) => item.name !== name));
+        const removeUser = (user) => {
+          setUserList((prev) => prev.filter((item) => item.name !== user.name));
+          const key = normalizeEmail(user.email || user.name);
+          if (key) {
+            setUserCredentials((prev) => {
+              const next = { ...prev };
+              delete next[key];
+              return next;
+            });
+          }
         };
 
         useEffect(() => {
@@ -6983,65 +7086,139 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           appendAudit({ user: currentUser, entryId: id, action: 'entry-delete-hard' });
         };
 
+        const resetLoginFields = () => {
+          setLoginEmail("");
+          setLoginPassword("");
+          setLoginPasswordConfirm("");
+          setLoginError("");
+        };
+
         const handleSignOut = () => {
           setCurrentUser(null);
-          setUserSelection("");
+          resetLoginFields();
           setCurrentView("login");
           closeEntry();
         };
 
-        const submitLogin = (event) => {
+        const submitLogin = async (event) => {
           event.preventDefault();
-          if (!userSelection) return;
-          setCurrentUser(userSelection);
+          setLoginError("");
+          const normalizedEmail = normalizeEmail(loginEmail);
+          if (!normalizedEmail) {
+            setLoginError("Enter the email you were invited with.");
+            return;
+          }
+          const credential = userCredentials[normalizedEmail];
+          if (!credential) {
+            setLoginError("We don't have an invitation for that email.");
+            return;
+          }
+          const needsSetup = credential.needsSetup || !credential.passwordHash;
+          if (!loginPassword) {
+            setLoginError("Enter a password.");
+            return;
+          }
+          if (needsSetup) {
+            if (!loginPasswordConfirm) {
+              setLoginError("Confirm your password.");
+              return;
+            }
+            if (loginPassword !== loginPasswordConfirm) {
+              setLoginError("Passwords must match.");
+              return;
+            }
+            const hashed = await hashString(loginPassword);
+            setUserCredentials((prev) => {
+              const next = { ...prev };
+              next[normalizedEmail] = { ...credential, passwordHash: hashed, needsSetup: false };
+              return next;
+            });
+          } else {
+            const valid = await verifyPassword(loginPassword, credential.passwordHash);
+            if (!valid) {
+              setLoginError("Invalid password.");
+              return;
+            }
+          }
+          setCurrentUser(credential.name);
+          resetLoginFields();
           setCurrentView("menu");
           closeEntry();
         };
 
         if (currentView === "login") {
+          const normalizedLoginEmail = normalizeEmail(loginEmail);
+          const pendingCredential = normalizedLoginEmail
+            ? userCredentials[normalizedLoginEmail]
+            : null;
+          const needsSetup = Boolean(
+            pendingCredential && (pendingCredential.needsSetup || !pendingCredential.passwordHash)
+          );
+          const helperText = pendingCredential
+            ? needsSetup
+              ? `Hi ${pendingCredential.name}. Set a password to accept the invite and enter the dashboard.`
+              : `Hi ${pendingCredential.name}, enter your password to continue.`
+            : "Enter the email you were invited with to set up access.";
+          const canSubmit =
+            Boolean(loginEmail) &&
+            Boolean(loginPassword) &&
+            (!needsSetup || Boolean(loginPasswordConfirm));
+          const submitLabel = needsSetup ? "Create password & enter" : "Enter dashboard";
           return (
             <div className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-4 py-16 text-ocean-900">
               <div className="rounded-3xl border border-aqua-200 bg-white p-8 shadow-2xl">
                 <h1 className="heading-font text-3xl font-semibold text-ocean-600">Content Dashboard</h1>
                 <p className="mt-2 text-sm text-graystone-600">
-                  Pick yourself from the roster to jump into planning, approvals, and production tracking.
+                  Use the email you were invited with. First-time visits ask you to choose a password before you can access planning and approvals.
                 </p>
                 <form className="mt-6 space-y-4" onSubmit={submitLogin}>
                   <div className="space-y-2">
-                    <Label className="text-sm text-graystone-600" htmlFor="login-user">
-                      Who&apos;s working?
+                    <Label className="text-sm text-graystone-600" htmlFor="login-email">
+                      Email
                     </Label>
-                      <select
-                        id="login-user"
-                        value={userSelection}
-                        onChange={(event) => setUserSelection(event.target.value)}
-                        className={cx(selectBaseClasses, "w-full px-4 py-3 text-sm")}
-                      >
-                        <option value="">Select your name</option>
-                        <optgroup label="Approvers">
-                          {approverList.map((name) => (
-                            <option key={`approver-${name}`} value={name}>
-                              {name}
-                            </option>
-                          ))}
-                        </optgroup>
-                        <optgroup label="Users">
-                          {userList
-                            .filter((user) => !approverList.includes(user.name))
-                            .map((user) => (
-                              <option key={`user-${user.name}`} value={user.name}>
-                                {user.name}
-                              </option>
-                            ))}
-                        </optgroup>
-                      </select>
+                    <Input
+                      id="login-email"
+                      type="email"
+                      autoComplete="email"
+                      value={loginEmail}
+                      onChange={(event) => setLoginEmail(event.target.value)}
+                      className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
+                    />
                   </div>
-                  <Button
-                    type="submit"
-                    disabled={!userSelection}
-                    className="w-full"
-                  >
-                    Enter dashboard
+                  <div className="space-y-2">
+                    <Label className="text-sm text-graystone-600" htmlFor="login-password">
+                      Password
+                    </Label>
+                    <Input
+                      id="login-password"
+                      type="password"
+                      autoComplete="current-password"
+                      value={loginPassword}
+                      onChange={(event) => setLoginPassword(event.target.value)}
+                      className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
+                    />
+                  </div>
+                  {needsSetup && (
+                    <div className="space-y-2">
+                      <Label className="text-sm text-graystone-600" htmlFor="login-password-confirm">
+                        Confirm password
+                      </Label>
+                      <Input
+                        id="login-password-confirm"
+                        type="password"
+                        autoComplete="new-password"
+                        value={loginPasswordConfirm}
+                        onChange={(event) => setLoginPasswordConfirm(event.target.value)}
+                        className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
+                      />
+                    </div>
+                  )}
+                  <div className="text-xs text-graystone-500">{helperText}</div>
+                  {loginError ? (
+                    <div className="text-xs text-rose-700">{loginError}</div>
+                  ) : null}
+                  <Button type="submit" className="w-full" disabled={!canSubmit}>
+                    {submitLabel}
                   </Button>
                 </form>
               </div>
@@ -8214,7 +8391,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                               <div className="font-medium text-graystone-900">{user.name}</div>
                               <div className="text-[11px] text-graystone-500">{user.email || 'No email'}</div>
                             </div>
-                            <Button variant="ghost" size="sm" onClick={() => removeUser(user.name)}>
+                            <Button variant="ghost" size="sm" onClick={() => removeUser(user)}>
                               Remove
                             </Button>
                           </div>
