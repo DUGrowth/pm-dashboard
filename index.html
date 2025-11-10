@@ -189,13 +189,13 @@
       };
 
       const DEFAULT_USERS = [
-        "Dan Davis",
-        "Francesca Harrison",
-        "Comms Lead",
-        "Campaigns Manager",
-        "Policy Lead",
-        "Creative Director",
-        "Social Lead",
+        { name: "Dan Davis", email: "dan@example.com" },
+        { name: "Francesca Harrison", email: "" },
+        { name: "Comms Lead", email: "" },
+        { name: "Campaigns Manager", email: "" },
+        { name: "Policy Lead", email: "" },
+        { name: "Creative Director", email: "" },
+        { name: "Social Lead", email: "" },
       ];
 
       const WORKFLOW_STAGES = [
@@ -335,7 +335,12 @@
           const raw = window.localStorage.getItem(USER_LIST_STORAGE_KEY);
           if (!raw) return DEFAULT_USERS;
           const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length) return parsed;
+          if (Array.isArray(parsed) && parsed.length) {
+            if (typeof parsed[0] === "string") {
+              return parsed.map((name) => ({ name, email: "" }));
+            }
+            return parsed;
+          }
         } catch {}
         return DEFAULT_USERS;
       };
@@ -5926,7 +5931,9 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [approverList, setApproverList] = useState(() => loadApprovers());
         const [newApproverName, setNewApproverName] = useState("");
         const [userList, setUserList] = useState(() => loadUsers());
-        const [newUserName, setNewUserName] = useState("");
+        const [newUserFirst, setNewUserFirst] = useState("");
+        const [newUserLast, setNewUserLast] = useState("");
+        const [newUserEmail, setNewUserEmail] = useState("");
         const [deepLinkEntryId, setDeepLinkEntryId] = useState(() => {
           if (typeof window === 'undefined') return '';
           try {
@@ -5942,23 +5949,46 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         useEffect(() => {
           saveUsers(userList);
         }, [userList]);
+        const sendNewUserEmail = (user) => {
+          if (!user || !user.email) return;
+          const subject = "PM Dashboard access granted";
+          const text = `Hi ${user.name},\n\nYou've been added to the Population Matters PM Dashboard. Visit ${window.location.origin} to log in with your name and collaborate.\n\nIf you weren't expecting this, please reach out to the comms team.`;
+          if (window.api && window.api.enabled && window.api.notify) {
+            window.api
+              .notify({ to: [user.email], subject, text })
+              .catch(() => {});
+          }
+        };
         const addApprover = () => {
           const next = newApproverName.trim();
           if (!next) return;
-          setApproverList((prev) => (prev.includes(next) ? prev : [...prev, next]));
+          setApproverList((prev) => {
+            if (prev.includes(next)) return prev;
+            return [...prev, next];
+          });
           setNewApproverName("");
         };
         const removeApprover = (name) => {
           setApproverList((prev) => prev.filter((item) => item !== name));
         };
         const addUser = () => {
-          const next = newUserName.trim();
-          if (!next) return;
-          setUserList((prev) => (prev.includes(next) ? prev : [...prev, next]));
-          setNewUserName("");
+          const first = newUserFirst.trim();
+          const last = newUserLast.trim();
+          const email = newUserEmail.trim();
+          if (!first || !last || !email) return;
+          const fullname = `${first} ${last}`;
+          setUserList((prev) => {
+            if (prev.some((user) => user.name === fullname)) return prev;
+            const next = [...prev, { name: fullname, email }];
+            sendNewUserEmail({ name: fullname, email });
+            return next;
+          });
+          setNewUserFirst("");
+          setNewUserLast("");
+          setNewUserEmail("");
         };
         const removeUser = (name) => {
-          setUserList((prev) => prev.filter((item) => item !== name));
+          setUserList((prev) => prev.filter((item) => item.name !== name));
         };
 
         useEffect(() => {
@@ -8099,36 +8129,54 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                     </p>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-2">
-                      {userList.length ? (
-                        userList.map((name) => (
-                          <div
-                            key={name}
-                            className="flex items-center justify-between rounded-xl border border-graystone-200 bg-white px-3 py-2 text-sm text-graystone-700"
-                          >
-                            <span>{name}</span>
-                            <Button variant="ghost" size="sm" onClick={() => removeUser(name)}>
-                              Remove
-                            </Button>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-xs text-graystone-500">No users configured yet.</p>
-                      )}
-                    </div>
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <Input
-                        placeholder="Add user name"
-                        value={newUserName}
-                        onChange={(event) => setNewUserName(event.target.value)}
-                        className="flex-1"
-                      />
-                      <Button onClick={addUser} disabled={!newUserName.trim()}>
-                        Add user
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                <div className="space-y-2">
+                  {userList.length ? (
+                    userList.map((user) => (
+                      <div
+                        key={user.name}
+                        className="flex items-center justify-between rounded-xl border border-graystone-200 bg-white px-3 py-2 text-sm text-graystone-700"
+                      >
+                        <div>
+                          <div className="font-medium text-graystone-900">{user.name}</div>
+                          <div className="text-[11px] text-graystone-500">{user.email || "No email"}</div>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={() => removeUser(user.name)}>
+                          Remove
+                        </Button>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-graystone-500">No users configured yet.</p>
+                  )}
+                </div>
+                <div className="mt-4 grid gap-2 md:grid-cols-3">
+                  <Input
+                    placeholder="First name"
+                    value={newUserFirst}
+                    onChange={(event) => setNewUserFirst(event.target.value)}
+                    className="px-3 py-2"
+                  />
+                  <Input
+                    placeholder="Last name"
+                    value={newUserLast}
+                    onChange={(event) => setNewUserLast(event.target.value)}
+                    className="px-3 py-2"
+                  />
+                  <Input
+                    placeholder="Email"
+                    type="email"
+                    value={newUserEmail}
+                    onChange={(event) => setNewUserEmail(event.target.value)}
+                    className="px-3 py-2"
+                  />
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Button onClick={addUser} disabled={!newUserFirst.trim() || !newUserLast.trim() || !newUserEmail.trim()}>
+                    Add user
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
               </div>
             )}
 
