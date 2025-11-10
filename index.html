@@ -6134,15 +6134,32 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             return mutated ? next : prev;
           });
         }, [userList]);
+        const notifyViaServer = (payload) => {
+          if (typeof window === "undefined" || !payload) return;
+          if (window.api && window.api.enabled && window.api.notify) {
+            try {
+              window.api.notify(payload).catch(() => {});
+              return;
+            } catch {
+              // ignore
+            }
+          }
+          try {
+            fetch("/api/notify", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(payload),
+            }).catch(() => {});
+          } catch {
+            // ignore
+          }
+        };
+
         const sendNewUserEmail = (user) => {
           if (!user || !user.email) return;
           const subject = "PM Dashboard access granted";
           const text = `Hi ${user.name},\n\nYou've been invited to the Population Matters PM Dashboard. Visit ${window.location.origin}, enter ${user.email}, and follow the prompts to set a password before jumping in.\n\nIf you weren't expecting this, please reach out to the comms team.`;
-          if (window.api && window.api.enabled && window.api.notify) {
-            window.api
-              .notify({ to: [user.email], subject, text })
-              .catch(() => {});
-          }
+          notifyViaServer({ to: [user.email], subject, text });
         };
         const addApprover = () => {
           const next = newApproverName.trim();
