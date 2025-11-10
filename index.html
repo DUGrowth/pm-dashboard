@@ -7022,10 +7022,10 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                         </optgroup>
                         <optgroup label="Users">
                           {userList
-                            .filter((user) => !approverList.includes(user))
+                            .filter((user) => !approverList.includes(user.name))
                             .map((user) => (
-                              <option key={`user-${user}`} value={user}>
-                                {user}
+                              <option key={`user-${user.name}`} value={user.name}>
+                                {user.name}
                               </option>
                             ))}
                         </optgroup>
@@ -8083,104 +8083,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                     )}
                   </CardContent>
                 </Card>
-                <Card className="shadow-xl">
-                  <CardHeader>
-                    <CardTitle className="text-lg text-ocean-900">Approver directory</CardTitle>
-                    <p className="mt-2 text-sm text-graystone-500">
-                      Add or remove approvers; these names feed the approvals experience.
-                    </p>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      {approverList.length ? (
-                        approverList.map((name) => (
-                          <div
-                            key={name}
-                            className="flex items-center justify-between rounded-xl border border-graystone-200 bg-white px-3 py-2 text-sm text-graystone-700"
-                          >
-                            <span>{name}</span>
-                            <Button variant="ghost" size="sm" onClick={() => removeApprover(name)}>
-                              Remove
-                            </Button>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-xs text-graystone-500">No approvers configured yet.</p>
-                      )}
-                    </div>
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <Input
-                        placeholder="Add approver name"
-                        value={newApproverName}
-                        onChange={(event) => setNewApproverName(event.target.value)}
-                        className="flex-1"
-                      />
-                      <Button onClick={addApprover} disabled={!newApproverName.trim()}>
-                        Add approver
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card className="shadow-xl">
-                  <CardHeader>
-                    <CardTitle className="text-lg text-ocean-900">User roster</CardTitle>
-                    <p className="mt-2 text-sm text-graystone-500">
-                      Manage the names that show up during login.
-                    </p>
-                  </CardHeader>
-                  <CardContent>
-                <div className="space-y-2">
-                  {userList.length ? (
-                    userList.map((user) => (
-                      <div
-                        key={user.name}
-                        className="flex items-center justify-between rounded-xl border border-graystone-200 bg-white px-3 py-2 text-sm text-graystone-700"
-                      >
-                        <div>
-                          <div className="font-medium text-graystone-900">{user.name}</div>
-                          <div className="text-[11px] text-graystone-500">{user.email || "No email"}</div>
-                        </div>
-                        <Button variant="ghost" size="sm" onClick={() => removeUser(user.name)}>
-                          Remove
-                        </Button>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-xs text-graystone-500">No users configured yet.</p>
-                  )}
-                </div>
-                <div className="mt-4 grid gap-2 md:grid-cols-3">
-                  <Input
-                    placeholder="First name"
-                    value={newUserFirst}
-                    onChange={(event) => setNewUserFirst(event.target.value)}
-                    className="px-3 py-2"
-                  />
-                  <Input
-                    placeholder="Last name"
-                    value={newUserLast}
-                    onChange={(event) => setNewUserLast(event.target.value)}
-                    className="px-3 py-2"
-                  />
-                  <Input
-                    placeholder="Email"
-                    type="email"
-                    value={newUserEmail}
-                    onChange={(event) => setNewUserEmail(event.target.value)}
-                    className="px-3 py-2"
-                  />
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <Button onClick={addUser} disabled={!newUserFirst.trim() || !newUserLast.trim() || !newUserEmail.trim()}>
-                    Add user
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-              </div>
-            )}
-
-            {currentView === "admin" && (
+                        {currentView === "admin" && (
               <div className="space-y-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
@@ -8194,7 +8097,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                       variant="outline"
                       onClick={() => {
                         if (window.api && window.api.enabled) {
-                          fetch('/api/health').then(()=>{}).catch(()=>{});
+                          fetch('/api/health').then(() => {}).catch(() => {});
                         }
                       }}
                     >
@@ -8242,6 +8145,108 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                           </div>
                         ))
                       )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="shadow-xl">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-ocean-900">Approver directory</CardTitle>
+                    <p className="mt-2 text-sm text-graystone-500">
+                      Add or remove approvers; these names drive approvals and notifications.
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {approverList.length ? (
+                        approverList.map((name) => (
+                          <div
+                            key={name}
+                            className="flex items-center justify-between rounded-xl border border-graystone-200 bg-white px-3 py-2 text-sm text-graystone-700"
+                          >
+                            <span>{name}</span>
+                            <Button variant="ghost" size="sm" onClick={() => removeApprover(name)}>
+                              Remove
+                            </Button>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-xs text-graystone-500">No approvers configured yet.</p>
+                      )}
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-2">
+                      <Input
+                        placeholder="Add approver name"
+                        value={newApproverName}
+                        onChange={(event) => setNewApproverName(event.target.value)}
+                        className="flex-1"
+                      />
+                      <Button onClick={addApprover} disabled={!newApproverName.trim()}>
+                        Add approver
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="shadow-xl">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-ocean-900">User roster</CardTitle>
+                    <p className="mt-2 text-sm text-graystone-500">
+                      Create users (first + last name + email) and mail them when they are added.
+                    </p>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {userList.length ? (
+                        userList.map((user) => (
+                          <div
+                            key={user.name}
+                            className="flex items-center justify-between rounded-xl border border-graystone-200 bg-white px-3 py-2 text-sm text-graystone-700"
+                          >
+                            <div>
+                              <div className="font-medium text-graystone-900">{user.name}</div>
+                              <div className="text-[11px] text-graystone-500">{user.email || 'No email'}</div>
+                            </div>
+                            <Button variant="ghost" size="sm" onClick={() => removeUser(user.name)}>
+                              Remove
+                            </Button>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-xs text-graystone-500">No users configured yet.</p>
+                      )}
+                    </div>
+                    <div className="mt-4 grid gap-2 md:grid-cols-3">
+                      <Input
+                        placeholder="First name"
+                        value={newUserFirst}
+                        onChange={(event) => setNewUserFirst(event.target.value)}
+                        className="px-3 py-2"
+                      />
+                      <Input
+                        placeholder="Last name"
+                        value={newUserLast}
+                        onChange={(event) => setNewUserLast(event.target.value)}
+                        className="px-3 py-2"
+                      />
+                      <Input
+                        placeholder="Email"
+                        type="email"
+                        value={newUserEmail}
+                        onChange={(event) => setNewUserEmail(event.target.value)}
+                        className="px-3 py-2"
+                      />
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <Button onClick={addUser} disabled={!newUserFirst.trim() || !newUserLast.trim() || !newUserEmail.trim()}>
+                        Add user
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
                     </div>
                   </CardContent>
                 </Card>
