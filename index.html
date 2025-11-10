@@ -5177,11 +5177,16 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           const body = commentDraft.trim();
           if (!body) return;
 
+          const normalizedUserNames = Array.isArray(users)
+            ? users
+                .map((user) => (typeof user === "string" ? user : user?.name || ""))
+                .filter(Boolean)
+            : [];
           const mentionDirectory = Array.from(
             new Set(
               [
                 ...approverOptions,
-                ...users,
+                ...normalizedUserNames,
                 ...(draft.approvers || []),
                 draft.author,
               ]
@@ -8083,7 +8088,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                     )}
                   </CardContent>
                 </Card>
-                        {currentView === "admin" && (
+            {currentView === "admin" && (
               <div className="space-y-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
@@ -8153,7 +8158,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                   <CardHeader>
                     <CardTitle className="text-lg text-ocean-900">Approver directory</CardTitle>
                     <p className="mt-2 text-sm text-graystone-500">
-                      Add or remove approvers; these names drive approvals and notifications.
+                      Manage the list of approvers that appear in approvals.
                     </p>
                   </CardHeader>
                   <CardContent>
@@ -8192,7 +8197,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                   <CardHeader>
                     <CardTitle className="text-lg text-ocean-900">User roster</CardTitle>
                     <p className="mt-2 text-sm text-graystone-500">
-                      Create users (first + last name + email) and mail them when they are added.
+                      Add new users (first + last + email); they’ll be emailed when created.
                     </p>
                   </CardHeader>
                   <CardContent>
@@ -8241,12 +8246,6 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                       <Button onClick={addUser} disabled={!newUserFirst.trim() || !newUserLast.trim() || !newUserEmail.trim()}>
                         Add user
                       </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-            )}
-
                     </div>
                   </CardContent>
                 </Card>
