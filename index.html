@@ -189,6 +189,7 @@
       };
 
       const DEFAULT_USERS = [
+        { name: "Daniel Davis", email: "daniel.davis@populationmatters.org" },
         { name: "Dan Davis", email: "dan@example.com" },
         { name: "Francesca Harrison", email: "" },
         { name: "Comms Lead", email: "" },
@@ -197,6 +198,35 @@
         { name: "Creative Director", email: "" },
         { name: "Social Lead", email: "" },
       ];
+
+      const FEATURE_OPTIONS = [
+        { key: "calendar", label: "Calendar & planning" },
+        { key: "kanban", label: "Production Kanban" },
+        { key: "approvals", label: "Approvals queue" },
+        { key: "ideas", label: "Ideas log" },
+        { key: "linkedin", label: "LinkedIn drafts" },
+        { key: "testing", label: "Testing lab" },
+        { key: "admin", label: "Admin tools" },
+      ];
+      const DEFAULT_FEATURES = FEATURE_OPTIONS.map((option) => option.key);
+      const ensureFeaturesList = (value) => {
+        if (!Array.isArray(value)) return [...DEFAULT_FEATURES];
+        const allowed = new Set(DEFAULT_FEATURES);
+        const normalized = Array.from(new Set(value.filter((entry) => typeof entry === "string" && allowed.has(entry))));
+        return normalized.length ? normalized : [...DEFAULT_FEATURES];
+      };
+      const normalizeUserValue = (value) => {
+        const base = typeof value === "string" ? { name: value, email: "" } : value || {};
+        const rawName = typeof base.name === "string" && base.name.trim() ? base.name.trim() : "";
+        const rawEmail = typeof base.email === "string" && base.email.trim() ? base.email.trim() : "";
+        const name = rawName || rawEmail || "Unknown user";
+        return {
+          name,
+          email: rawEmail,
+          features: ensureFeaturesList(base.features),
+        };
+      };
+      const DEFAULT_USER_RECORDS = DEFAULT_USERS.map(normalizeUserValue);
 
       const normalizeEmail = (value) => {
         if (!value) return "";
@@ -211,6 +241,12 @@
         acc[key] = { name: user.name, email: user.email || "", needsSetup: true };
         return acc;
       }, {});
+      INITIAL_CREDENTIALS["daniel.davis@populationmatters.org"] = {
+        name: "Daniel Davis",
+        email: "daniel.davis@populationmatters.org",
+        needsSetup: false,
+        passwordHash: "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+      };
 
       const WORKFLOW_STAGES = [
         "Briefing",
@@ -383,19 +419,20 @@
         } catch {}
       };
       const loadUsers = () => {
-        if (!storageAvailable) return DEFAULT_USERS;
+        if (!storageAvailable) return DEFAULT_USER_RECORDS;
         try {
           const raw = window.localStorage.getItem(USER_LIST_STORAGE_KEY);
-          if (!raw) return DEFAULT_USERS;
+          if (!raw) return DEFAULT_USER_RECORDS;
           const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length) {
-            if (typeof parsed[0] === "string") {
-              return parsed.map((name) => ({ name, email: "" }));
-            }
-            return parsed;
+          if (!Array.isArray(parsed) || !parsed.length) {
+            return DEFAULT_USER_RECORDS;
           }
-        } catch {}
-        return DEFAULT_USERS;
+          return parsed
+            .map((item) => normalizeUserValue(item))
+            .filter((user) => user.name || user.email);
+        } catch {
+          return DEFAULT_USER_RECORDS;
+        }
       };
       const saveUsers = (next) => {
         if (!storageAvailable) return;
@@ -3957,6 +3994,67 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
     );
   }
 
+  function AccessModal({ open, onClose, user, features = [], onSave }) {
+    const [selectedFeatures, setSelectedFeatures] = useState(features);
+    useEffect(() => {
+      setSelectedFeatures(features);
+    }, [features]);
+    if (!open || !user) return null;
+    const toggleFeature = (key) => {
+      setSelectedFeatures((prev) =>
+        prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]
+      );
+    };
+    const canSave = selectedFeatures.length > 0;
+    return (
+      <Modal open={open} onClose={onClose}>
+        <div className="space-y-4 px-6 py-6">
+          <div>
+            <h3 className="text-lg font-semibold text-ocean-900">Access for {user.name}</h3>
+            <p className="text-xs text-graystone-500">
+              Select which features this user can access. At least one selection is required.
+            </p>
+          </div>
+          <div className="grid gap-2">
+            {FEATURE_OPTIONS.map((option) => {
+              const enabled = selectedFeatures.includes(option.key);
+              return (
+                <label
+                  key={option.key}
+                  className={cx(
+                    "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-semibold transition",
+                    enabled
+                      ? "border-aqua-200 bg-aqua-50 text-ocean-700"
+                      : "border-graystone-200 bg-white text-graystone-600 hover:border-graystone-400"
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={() => toggleFeature(option.key)}
+                    className="h-4 w-4 rounded border-graystone-300 text-aqua-500 focus:ring-aqua-300"
+                  />
+                  <span>{option.label}</span>
+                </label>
+              );
+            })}
+          </div>
+          {!canSave ? (
+            <div className="text-xs text-rose-600">Select at least one feature before saving.</div>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button onClick={() => onSave(selectedFeatures)} disabled={!canSave}>
+              Save access
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
   function ApprovalsModal({ open, onClose, approvals = [], onOpenEntry, onApprove }) {
     const hasItems = approvals.length > 0;
     return (
@@ -5994,6 +6092,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [newUserFirst, setNewUserFirst] = useState("");
         const [newUserLast, setNewUserLast] = useState("");
         const [newUserEmail, setNewUserEmail] = useState("");
+        const [newUserFeatures, setNewUserFeatures] = useState(() => [...DEFAULT_FEATURES]);
+        const [accessModalUser, setAccessModalUser] = useState(null);
         const [deepLinkEntryId, setDeepLinkEntryId] = useState(() => {
           if (typeof window === 'undefined') return '';
           try {
@@ -6063,6 +6163,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           if (!first || !last || !email) return;
           const fullname = `${first} ${last}`;
           const normalizedEmail = normalizeEmail(email);
+          const selectedFeatures = ensureFeaturesList(newUserFeatures);
           setUserList((prev) => {
             if (
               prev.some(
@@ -6072,7 +6173,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               )
             )
               return prev;
-            const next = [...prev, { name: fullname, email }];
+            const next = [...prev, { name: fullname, email, features: selectedFeatures }];
             sendNewUserEmail({ name: fullname, email });
             return next;
           });
@@ -6086,6 +6187,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           setNewUserFirst("");
           setNewUserLast("");
           setNewUserEmail("");
+          setNewUserFeatures([...DEFAULT_FEATURES]);
         };
         const removeUser = (user) => {
           setUserList((prev) => prev.filter((item) => item.name !== user.name));
@@ -6097,6 +6199,21 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               return next;
             });
           }
+        };
+        const toggleNewUserFeature = (feature) => {
+          setNewUserFeatures((prev) =>
+            prev.includes(feature) ? prev.filter((item) => item !== feature) : [...prev, feature]
+          );
+        };
+        const handleAccessSave = (features) => {
+          if (!accessModalUser) return;
+          const normalized = ensureFeaturesList(features);
+          setUserList((prev) =>
+            prev.map((user) =>
+              user.name === accessModalUser.name ? { ...user, features: normalized } : user
+            )
+          );
+          setAccessModalUser(null);
         };
 
         useEffect(() => {
@@ -8391,9 +8508,14 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                               <div className="font-medium text-graystone-900">{user.name}</div>
                               <div className="text-[11px] text-graystone-500">{user.email || 'No email'}</div>
                             </div>
-                            <Button variant="ghost" size="sm" onClick={() => removeUser(user)}>
-                              Remove
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Button variant="outline" size="sm" onClick={() => setAccessModalUser(user)}>
+                                Access
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => removeUser(user)}>
+                                Remove
+                              </Button>
+                            </div>
                           </div>
                         ))
                       ) : (
@@ -8420,6 +8542,33 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                         onChange={(event) => setNewUserEmail(event.target.value)}
                         className="px-3 py-2"
                       />
+                    </div>
+                    <div className="mt-3">
+                      <div className="text-xs font-semibold text-graystone-600">Grant access to</div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {FEATURE_OPTIONS.map((option) => {
+                          const enabled = newUserFeatures.includes(option.key);
+                          return (
+                            <label
+                              key={option.key}
+                              className={cx(
+                                "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold transition",
+                                enabled
+                                  ? "border-aqua-200 bg-aqua-100 text-ocean-700"
+                                  : "border-graystone-200 bg-white text-graystone-600 hover:border-graystone-400"
+                              )}
+                            >
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 rounded border-graystone-300 text-aqua-500 focus:ring-aqua-300"
+                                checked={enabled}
+                                onChange={() => toggleNewUserFeature(option.key)}
+                              />
+                              <span>{option.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <Button onClick={addUser} disabled={!newUserFirst.trim() || !newUserLast.trim() || !newUserEmail.trim()}>
@@ -8454,6 +8603,13 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 openEntry(id);
               }}
               onApprove={(id) => toggleApprove(id)}
+            />
+            <AccessModal
+              open={Boolean(accessModalUser)}
+              user={accessModalUser}
+              features={accessModalUser?.features || DEFAULT_FEATURES}
+              onClose={() => setAccessModalUser(null)}
+              onSave={handleAccessSave}
             />
             <GuidelinesModal
               open={guidelinesOpen}
