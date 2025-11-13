@@ -112,6 +112,9 @@ const authorizeViaAccess = async (request: Request, env: any) => {
   const name = headerValue(request, NAME_HEADERS) || rawEmail;
   const user = await ensureUserForAccess(env, normalizedEmail, name);
   if (!user) return null;
+  if (user.status === 'disabled') {
+    return { error: 'Forbidden', status: 403 };
+  }
   return user;
 };
 

@@ -235,6 +235,16 @@
       };
       const DEFAULT_USER_RECORDS = DEFAULT_USERS.map(normalizeUserValue);
 
+      const PLAN_TAB_FEATURES = {
+        plan: "calendar",
+        trash: "calendar",
+        kanban: "kanban",
+        ideas: "ideas",
+        linkedin: "linkedin",
+        testing: "testing",
+      };
+      const PLAN_TAB_ORDER = ["plan", "kanban", "ideas", "linkedin", "testing", "trash"];
+
       const normalizeEmail = (value) => {
         if (!value) return "";
         return String(value).trim().toLowerCase();
@@ -5988,6 +5998,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [adminAudits, setAdminAudits] = useState([]);
         const [selectedFrameworkId, setSelectedFrameworkId] = useState("");
         const [currentUser, setCurrentUser] = useState("");
+        const [currentUserFeatures, setCurrentUserFeatures] = useState(() => []);
+        const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState(false);
         const [authStatus, setAuthStatus] = useState("loading");
         const [authError, setAuthError] = useState("");
         const [currentView, setCurrentView] = useState("menu");
@@ -6040,6 +6052,24 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             return '';
           }
         });
+        const hasFeature = useCallback(
+          (feature) => currentUserIsAdmin || currentUserFeatures.includes(feature),
+          [currentUserFeatures, currentUserIsAdmin]
+        );
+        const canUseCalendar = hasFeature("calendar");
+        const canUseKanban = hasFeature("kanban");
+        const canUseApprovals = hasFeature("approvals");
+        const canUseIdeas = hasFeature("ideas");
+        const canUseLinkedIn = hasFeature("linkedin");
+        const canUseTesting = hasFeature("testing");
+        const menuHasContent =
+          canUseCalendar ||
+          canUseKanban ||
+          canUseApprovals ||
+          canUseIdeas ||
+          canUseLinkedIn ||
+          canUseTesting ||
+          currentUserIsAdmin;
         const hydrateCurrentUser = useCallback(async () => {
           setAuthStatus("loading");
           setAuthError("");
@@ -6057,10 +6087,16 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 ? String(payload.name).trim()
                 : String(payload?.email || "");
             setCurrentUser(nextName);
+            setCurrentUserFeatures(ensureFeaturesList(payload?.features));
+            setCurrentUserIsAdmin(Boolean(payload?.isAdmin));
             setAuthStatus("ready");
           } catch (error) {
             console.warn("Failed to fetch authenticated user", error);
             setCurrentUser("");
+            setCurrentUserFeatures([]);
+            setCurrentUserIsAdmin(false);
+            setUserList([]);
+            setAccessModalUser(null);
             setAuthError("Unable to verify your session. Please sign in below.");
             setAuthStatus(inviteToken ? "invite" : "login");
           }
@@ -6075,6 +6111,37 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             setAuthStatus("invite");
           }
         }, [inviteToken, authStatus]);
+
+        useEffect(() => {
+          const required = PLAN_TAB_FEATURES[planTab];
+          if (required && !hasFeature(required)) {
+            for (const tab of PLAN_TAB_ORDER) {
+              const needed = PLAN_TAB_FEATURES[tab];
+              if (!needed || hasFeature(needed)) {
+                setPlanTab(tab);
+                return;
+              }
+            }
+          }
+        }, [planTab, hasFeature]);
+
+        useEffect(() => {
+          if (currentView === "form" && !canUseCalendar) {
+            setCurrentView("menu");
+          } else if (currentView === "approvals" && !canUseApprovals) {
+            setCurrentView("menu");
+          } else if (currentView === "admin" && !currentUserIsAdmin) {
+            setCurrentView("menu");
+          } else if (currentView === "plan") {
+            const canUsePlan = PLAN_TAB_ORDER.some((tab) => {
+              const needed = PLAN_TAB_FEATURES[tab];
+              return !needed || hasFeature(needed);
+            });
+            if (!canUsePlan) {
+              setCurrentView("menu");
+            }
+          }
+        }, [currentView, hasFeature, currentUserIsAdmin, canUseCalendar, canUseApprovals]);
 
         useEffect(() => {
           saveApprovers(approverList);
@@ -6115,6 +6182,10 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const addUser = async () => {
           setUserAdminError("");
           setUserAdminSuccess("");
+          if (!currentUserIsAdmin) {
+            setUserAdminError("You do not have permission to manage users.");
+            return;
+          }
           const first = newUserFirst.trim();
           const last = newUserLast.trim();
           const email = newUserEmail.trim();
@@ -6152,6 +6223,10 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           if (!user?.id) return;
           setUserAdminError("");
           setUserAdminSuccess("");
+          if (!currentUserIsAdmin) {
+            setUserAdminError("You do not have permission to manage users.");
+            return;
+          }
           if (!window.api || typeof window.api.deleteUser !== "function") {
             setUserAdminError("Server is offline.");
             return;
@@ -6172,6 +6247,11 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         };
         const handleAccessSave = async (features) => {
           if (!accessModalUser) return;
+          if (!currentUserIsAdmin) {
+            setUserAdminError("You do not have permission to manage users.");
+            setAccessModalUser(null);
+            return;
+          }
           const normalized = ensureFeaturesList(features);
           if (!window.api || typeof window.api.updateUser !== "function") {
             setUserAdminError("Server is offline.");
@@ -6206,64 +6286,110 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           (async () => {
             try {
               if (window.api && window.api.enabled) {
-                const [serverEntries, serverIdeas, serverLinkedIn, serverFrameworks, serverGuidelines, serverUsers] =
-                  await Promise.all([
-                    window.api.listEntries().catch(() => []),
-                    window.api.listIdeas().catch(() => []),
-                    window.api.listLinkedIn().catch(() => []),
-                    window.api.listTestingFrameworks().catch(() => []),
-                    window.api.getGuidelines ? window.api.getGuidelines().catch(() => null) : Promise.resolve(null),
-                    window.api.listUsers ? window.api.listUsers().catch(() => []) : Promise.resolve([]),
-                  ]);
+                const wantsIdeas = canUseIdeas;
+                const wantsLinkedIn = canUseLinkedIn;
+                const wantsTesting = canUseTesting;
+                const wantsUsers = currentUserIsAdmin;
+                const [
+                  serverEntries,
+                  serverIdeas,
+                  serverLinkedIn,
+                  serverFrameworks,
+                  serverGuidelines,
+                  serverUsers,
+                ] = await Promise.all([
+                  window.api.listEntries().catch(() => []),
+                  wantsIdeas ? window.api.listIdeas().catch(() => []) : Promise.resolve([]),
+                  wantsLinkedIn ? window.api.listLinkedIn().catch(() => []) : Promise.resolve([]),
+                  wantsTesting ? window.api.listTestingFrameworks().catch(() => []) : Promise.resolve([]),
+                  window.api.getGuidelines ? window.api.getGuidelines().catch(() => null) : Promise.resolve(null),
+                  wantsUsers && window.api.listUsers ? window.api.listUsers().catch(() => []) : Promise.resolve([]),
+                ]);
                 if (cancelled) return;
                 if (Array.isArray(serverEntries)) setEntries(serverEntries);
-                if (Array.isArray(serverIdeas)) setIdeas(serverIdeas);
-                if (Array.isArray(serverLinkedIn)) setLinkedinSubmissions(serverLinkedIn);
-                if (Array.isArray(serverFrameworks)) setTestingFrameworks(serverFrameworks);
+                if (wantsIdeas) {
+                  if (Array.isArray(serverIdeas)) setIdeas(serverIdeas);
+                } else {
+                  setIdeas([]);
+                }
+                if (wantsLinkedIn) {
+                  if (Array.isArray(serverLinkedIn)) setLinkedinSubmissions(serverLinkedIn);
+                } else {
+                  setLinkedinSubmissions([]);
+                }
+                if (wantsTesting) {
+                  if (Array.isArray(serverFrameworks)) setTestingFrameworks(serverFrameworks);
+                } else {
+                  setTestingFrameworks([]);
+                }
                 if (serverGuidelines) {
                   const normalized = normalizeGuidelines(serverGuidelines);
                   setGuidelines(normalized);
                   saveGuidelines(normalized);
                 }
-                if (Array.isArray(serverUsers)) setUserList(serverUsers);
+                if (wantsUsers) {
+                  if (Array.isArray(serverUsers)) setUserList(serverUsers);
+                } else {
+                  setUserList([]);
+                }
               }
             } catch {}
           })();
           return () => {
             cancelled = true;
           };
-        }, [authStatus]);
+        }, [authStatus, canUseIdeas, canUseLinkedIn, canUseTesting, currentUserIsAdmin]);
 
         // Also hydrate when the api client announces readiness
         useEffect(() => {
           const onReady = (e) => {
             if (e?.detail?.enabled && authStatus === "ready") {
+              const wantsIdeas = canUseIdeas;
+              const wantsLinkedIn = canUseLinkedIn;
+              const wantsTesting = canUseTesting;
+              const wantsUsers = currentUserIsAdmin;
               Promise.all([
                 window.api.listEntries().catch(() => []),
-                window.api.listIdeas().catch(() => []),
-                window.api.listLinkedIn().catch(() => []),
-                window.api.listTestingFrameworks().catch(() => []),
+                wantsIdeas ? window.api.listIdeas().catch(() => []) : Promise.resolve([]),
+                wantsLinkedIn ? window.api.listLinkedIn().catch(() => []) : Promise.resolve([]),
+                wantsTesting ? window.api.listTestingFrameworks().catch(() => []) : Promise.resolve([]),
                 window.api.getGuidelines ? window.api.getGuidelines().catch(() => null) : Promise.resolve(null),
-                window.api.listUsers ? window.api.listUsers().catch(() => []) : Promise.resolve([]),
+                wantsUsers && window.api.listUsers ? window.api.listUsers().catch(() => []) : Promise.resolve([]),
               ])
                 .then(([serverEntries, serverIdeas, serverLinkedIn, serverFrameworks, serverGuidelines, serverUsers]) => {
                   if (Array.isArray(serverEntries)) setEntries(serverEntries);
-                  if (Array.isArray(serverIdeas)) setIdeas(serverIdeas);
-                  if (Array.isArray(serverLinkedIn)) setLinkedinSubmissions(serverLinkedIn);
-                  if (Array.isArray(serverFrameworks)) setTestingFrameworks(serverFrameworks);
+                  if (wantsIdeas) {
+                    if (Array.isArray(serverIdeas)) setIdeas(serverIdeas);
+                  } else {
+                    setIdeas([]);
+                  }
+                  if (wantsLinkedIn) {
+                    if (Array.isArray(serverLinkedIn)) setLinkedinSubmissions(serverLinkedIn);
+                  } else {
+                    setLinkedinSubmissions([]);
+                  }
+                  if (wantsTesting) {
+                    if (Array.isArray(serverFrameworks)) setTestingFrameworks(serverFrameworks);
+                  } else {
+                    setTestingFrameworks([]);
+                  }
                   if (serverGuidelines) {
                     const normalized = normalizeGuidelines(serverGuidelines);
                     setGuidelines(normalized);
                     saveGuidelines(normalized);
                   }
-                  if (Array.isArray(serverUsers)) setUserList(serverUsers);
+                  if (wantsUsers) {
+                    if (Array.isArray(serverUsers)) setUserList(serverUsers);
+                  } else {
+                    setUserList([]);
+                  }
                 })
                 .catch(() => {});
             }
           };
           window.addEventListener("pm-api-ready", onReady);
           return () => window.removeEventListener("pm-api-ready", onReady);
-        }, [authStatus]);
+        }, [authStatus, canUseIdeas, canUseLinkedIn, canUseTesting, currentUserIsAdmin]);
 
         useEffect(() => {
           setMenuMotionActive(true);
@@ -6315,6 +6441,18 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             window.localStorage.removeItem(USER_STORAGE_KEY);
           }
         }, [currentUser]);
+
+        useEffect(() => {
+          if (!currentUserIsAdmin) {
+            setAccessModalUser(null);
+          }
+        }, [currentUserIsAdmin]);
+
+        useEffect(() => {
+          if (!canUseApprovals) {
+            setApprovalsModalOpen(false);
+          }
+        }, [canUseApprovals]);
 
         useEffect(() => {
           saveNotifications(notifications);
@@ -7212,10 +7350,14 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               }
             } catch {}
             setCurrentUser("");
+            setCurrentUserFeatures([]);
+            setCurrentUserIsAdmin(false);
             setAuthStatus("login");
             resetLoginFields();
             setCurrentView("menu");
             closeEntry();
+            setUserList([]);
+            setAccessModalUser(null);
           })();
         };
 
@@ -7249,6 +7391,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 ? response.user.name.trim()
                 : normalizedEmail;
             setCurrentUser(name);
+            setCurrentUserFeatures(ensureFeaturesList(response?.user?.features));
+            setCurrentUserIsAdmin(Boolean(response?.user?.isAdmin));
             setAuthStatus("ready");
             setAuthError("");
             resetLoginFields();
@@ -7306,6 +7450,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 ? response.user.name.trim()
                 : response?.user?.email || "";
             setCurrentUser(name);
+            setCurrentUserFeatures(ensureFeaturesList(response?.user?.features));
+            setCurrentUserIsAdmin(Boolean(response?.user?.isAdmin));
             setInviteToken("");
             setInvitePassword("");
             setInvitePasswordConfirm("");
@@ -7473,21 +7619,25 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => outstandingCount > 0 && setApprovalsModalOpen(true)}
-                      disabled={outstandingCount === 0}
-                      className="heading-font inline-flex items-center gap-2 rounded-full border border-[#0F9DDE]/30 bg-aqua-100/80 px-4 py-2 text-sm font-semibold text-ocean-700 transition hover:-translate-y-0.5 hover:shadow-[0_0_25px_rgba(15,157,222,0.35)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0F9DDE]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[#CFEBF8] disabled:translate-y-0 disabled:shadow-none disabled:opacity-60"
-                    >
-                      <span className="inline-block h-3 w-3 rounded-full bg-[#00F5FF]" aria-hidden="true" />
-                      {outstandingCount} awaiting approval
-                    </button>
-                    {unreadMentionsCount > 0 ? (
-                      <span className="heading-font inline-flex items-center gap-2 rounded-full bg-aqua-100 px-4 py-2 text-sm font-semibold text-ocean-700">
-                        <span className="inline-block h-3 w-3 rounded-full bg-[#00F5FF]" aria-hidden="true" />
-                        {unreadMentionsCount} new mentions
-                      </span>
-                    ) : null}
+                    {canUseApprovals && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => outstandingCount > 0 && setApprovalsModalOpen(true)}
+                          disabled={outstandingCount === 0}
+                          className="heading-font inline-flex items-center gap-2 rounded-full border border-[#0F9DDE]/30 bg-aqua-100/80 px-4 py-2 text-sm font-semibold text-ocean-700 transition hover:-translate-y-0.5 hover:shadow-[0_0_25px_rgba(15,157,222,0.35)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0F9DDE]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-[#CFEBF8] disabled:translate-y-0 disabled:shadow-none disabled:opacity-60"
+                        >
+                          <span className="inline-block h-3 w-3 rounded-full bg-[#00F5FF]" aria-hidden="true" />
+                          {outstandingCount} awaiting approval
+                        </button>
+                        {unreadMentionsCount > 0 ? (
+                          <span className="heading-font inline-flex items-center gap-2 rounded-full bg-aqua-100 px-4 py-2 text-sm font-semibold text-ocean-700">
+                            <span className="inline-block h-3 w-3 rounded-full bg-[#00F5FF]" aria-hidden="true" />
+                            {unreadMentionsCount} new mentions
+                          </span>
+                        ) : null}
+                      </>
+                    )}
                     <Button
                       onClick={handleSignOut}
                       className="heading-font text-sm normal-case"
@@ -7525,7 +7675,9 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                   </div>
                 </header>
 
+                {menuHasContent ? (
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
+                  {canUseCalendar && (
                   <div
                     className="flex min-h-full flex-col items-start gap-4 border border-[#0F9DDE]/40 bg-white p-8 text-left text-ocean-900 shadow-[0_0_35px_rgba(15,157,222,0.3)]"
                   >
@@ -7563,6 +7715,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                       Open form
                     </Button>
                   </div>
+                  )}
+                  {canUseCalendar && (
                   <div
                     className="flex min-h-full flex-col items-start gap-4 border border-[#0F9DDE]/40 bg-white p-8 text-left text-ocean-900 shadow-[0_0_35px_rgba(15,157,222,0.3)]"
                   >
@@ -7599,6 +7753,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                       View calendar
                     </Button>
                   </div>
+                  )}
+                  {canUseKanban && (
                   <div
                     className="flex min-h-full flex-col items-start gap-4 border border-[#0F9DDE]/40 bg-white p-8 text-left text-ocean-900 shadow-[0_0_35px_rgba(15,157,222,0.3)]"
                   >
@@ -7635,6 +7791,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                       View board
                     </Button>
                   </div>
+                  )}
+                  {canUseLinkedIn && (
                   <div
                     className="flex min-h-full flex-col items-start gap-4 border border-[#0F9DDE]/40 bg-white p-8 text-left text-ocean-900 shadow-[0_0_35px_rgba(15,157,222,0.3)]"
                   >
@@ -7671,6 +7829,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                       View drafts
                     </Button>
                   </div>
+                  )}
+                  {canUseTesting && (
                   <div
                     className="flex min-h-full flex-col items-start gap-4 border border-[#0F9DDE]/40 bg-white p-8 text-left text-ocean-900 shadow-[0_0_35px_rgba(15,157,222,0.3)]"
                   >
@@ -7707,6 +7867,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                       Explore tests
                     </Button>
                   </div>
+                  )}
+                  {canUseApprovals && (
                   <div
                     className="flex min-h-full flex-col items-start gap-4 border border-[#0F9DDE]/40 bg-white p-8 text-left text-ocean-900 shadow-[0_0_35px_rgba(15,157,222,0.3)]"
                   >
@@ -7743,6 +7905,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                       View queue
                     </Button>
                   </div>
+                  )}
+                  {canUseIdeas && (
                   <div
                     className="flex min-h-full flex-col items-start gap-4 border border-[#0F9DDE]/40 bg-white p-8 text-left text-ocean-900 shadow-[0_0_35px_rgba(15,157,222,0.3)]"
                   >
@@ -7779,6 +7943,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                       View ideas
                     </Button>
                   </div>
+                  )}
+                  {currentUserIsAdmin && (
                   <div
                     className="flex min-h-full flex-col items-start gap-4 border border-[#0F9DDE]/40 bg-white p-8 text-left text-ocean-900 shadow-[0_0_35px_rgba(15,157,222,0.3)]"
                   >
@@ -7814,7 +7980,14 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                       View admin
                     </Button>
                   </div>
+                  )}
                 </div>
+                ) : (
+                  <div className="rounded-3xl border border-aqua-200 bg-white p-8 text-sm text-graystone-600 shadow-[0_0_35px_rgba(15,157,222,0.2)]">
+                    You don't have any modules assigned yet. Ask an administrator to grant access to specific areas of
+                    the dashboard.
+                  </div>
+                )}
                 {userNotifications.length > 0 && (
                   <Card className="mt-8 shadow-xl">
                     <CardHeader>
@@ -7854,7 +8027,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               </>
             )}
 
-            {currentView === "form" && (
+            {currentView === "form" && canUseCalendar && (
               <div className="space-y-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-col gap-1">
@@ -7968,90 +8141,104 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                     >
                       Back to menu
                     </Button>
-                    <div className="flex items-center gap-2 rounded-3xl border border-aqua-200 bg-aqua-50 p-1 text-ocean-600">
-                      <Button
-                        variant="ghost"
-                        onClick={() => setPlanTab("plan")}
-                        className={cx(
-                          "rounded-2xl px-4 py-2 text-sm transition",
-                          planTab === "plan"
-                            ? "bg-ocean-500 text-white hover:bg-ocean-600"
-                            : "text-ocean-600 hover:bg-aqua-100"
-                        )}
-                      >
-                        Calendar
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => setPlanTab("trash")}
-                        className={cx(
-                          "rounded-2xl px-4 py-2 text-sm transition",
-                          planTab === "trash"
-                            ? "bg-ocean-500 text-white hover:bg-ocean-600"
-                            : "text-ocean-600 hover:bg-aqua-100"
-                        )}
-                      >
-                        Trash
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => setPlanTab("kanban")}
-                        className={cx(
-                          "rounded-2xl px-4 py-2 text-sm transition",
-                          planTab === "kanban"
-                            ? "bg-ocean-500 text-white hover:bg-ocean-600"
-                            : "text-ocean-600 hover:bg-aqua-100"
-                        )}
-                      >
-                        Kanban
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => setPlanTab("ideas")}
-                        className={cx(
-                          "rounded-2xl px-4 py-2 text-sm transition",
-                          planTab === "ideas"
-                            ? "bg-ocean-500 text-white hover:bg-ocean-600"
-                            : "text-ocean-600 hover:bg-aqua-100"
-                        )}
-                      >
-                        Ideas
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => setPlanTab("linkedin")}
-                        className={cx(
-                          "rounded-2xl px-4 py-2 text-sm transition",
-                          planTab === "linkedin"
-                            ? "bg-ocean-500 text-white hover:bg-ocean-600"
-                            : "text-ocean-600 hover:bg-aqua-100"
-                        )}
-                      >
-                        LinkedIn
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => setPlanTab("testing")}
-                        className={cx(
-                          "rounded-2xl px-4 py-2 text-sm transition",
-                          planTab === "testing"
-                            ? "bg-ocean-500 text-white hover:bg-ocean-600"
-                            : "text-ocean-600 hover:bg-aqua-100"
-                        )}
-                      >
-                        Testing Lab
-                      </Button>
-                    </div>
+                <div className="flex items-center gap-2 rounded-3xl border border-aqua-200 bg-aqua-50 p-1 text-ocean-600">
+                      {canUseCalendar && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            onClick={() => setPlanTab("plan")}
+                            className={cx(
+                              "rounded-2xl px-4 py-2 text-sm transition",
+                              planTab === "plan"
+                                ? "bg-ocean-500 text-white hover:bg-ocean-600"
+                                : "text-ocean-600 hover:bg-aqua-100"
+                            )}
+                          >
+                            Calendar
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={() => setPlanTab("trash")}
+                            className={cx(
+                              "rounded-2xl px-4 py-2 text-sm transition",
+                              planTab === "trash"
+                                ? "bg-ocean-500 text-white hover:bg-ocean-600"
+                                : "text-ocean-600 hover:bg-aqua-100"
+                            )}
+                          >
+                            Trash
+                          </Button>
+                        </>
+                      )}
+                      {canUseKanban && (
+                        <Button
+                          variant="ghost"
+                          onClick={() => setPlanTab("kanban")}
+                          className={cx(
+                            "rounded-2xl px-4 py-2 text-sm transition",
+                            planTab === "kanban"
+                              ? "bg-ocean-500 text-white hover:bg-ocean-600"
+                              : "text-ocean-600 hover:bg-aqua-100"
+                          )}
+                        >
+                          Kanban
+                        </Button>
+                      )}
+                      {canUseIdeas && (
+                        <Button
+                          variant="ghost"
+                          onClick={() => setPlanTab("ideas")}
+                          className={cx(
+                            "rounded-2xl px-4 py-2 text-sm transition",
+                            planTab === "ideas"
+                              ? "bg-ocean-500 text-white hover:bg-ocean-600"
+                              : "text-ocean-600 hover:bg-aqua-100"
+                          )}
+                        >
+                          Ideas
+                        </Button>
+                      )}
+                      {canUseLinkedIn && (
+                        <Button
+                          variant="ghost"
+                          onClick={() => setPlanTab("linkedin")}
+                          className={cx(
+                            "rounded-2xl px-4 py-2 text-sm transition",
+                            planTab === "linkedin"
+                              ? "bg-ocean-500 text-white hover:bg-ocean-600"
+                              : "text-ocean-600 hover:bg-aqua-100"
+                          )}
+                        >
+                          LinkedIn
+                        </Button>
+                      )}
+                      {canUseTesting && (
+                        <Button
+                          variant="ghost"
+                          onClick={() => setPlanTab("testing")}
+                          className={cx(
+                            "rounded-2xl px-4 py-2 text-sm transition",
+                            planTab === "testing"
+                              ? "bg-ocean-500 text-white hover:bg-ocean-600"
+                              : "text-ocean-600 hover:bg-aqua-100"
+                          )}
+                        >
+                          Testing Lab
+                        </Button>
+                      )}
+                </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
                       onClick={() => {
+                        if (!canUseCalendar) return;
                         setCurrentView("form");
                         setPlanTab("plan");
                         closeEntry();
                         try { window.location.hash = '#create'; } catch {}
                       }}
                       className="gap-2"
+                      disabled={!canUseCalendar}
                     >
                       <PlusIcon className="h-4 w-4 text-white" />
                       Create content
@@ -8075,6 +8262,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 {(() => {
                   switch (planTab) {
                     case "plan":
+                      if (!canUseCalendar) return null;
                       return (
                         <Card className="shadow-xl">
                           <CardHeader>
@@ -8223,6 +8411,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                         </Card>
                       );
                     case "trash":
+                      if (!canUseCalendar) return null;
                       return (
                         <Card className="shadow-xl">
                           <CardHeader>
@@ -8270,6 +8459,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                         </Card>
                       );
                     case "kanban":
+                      if (!canUseKanban) return null;
                       return (
                         <KanbanBoard
                           statuses={KANBAN_STATUSES}
@@ -8279,6 +8469,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                         />
                       );
                     case "ideas":
+                      if (!canUseIdeas) return null;
                       return (
                         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                           <IdeaForm onSubmit={addIdea} currentUser={currentUser} />
@@ -8286,6 +8477,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                         </div>
                       );
                     case "linkedin":
+                      if (!canUseLinkedIn) return null;
                       return (
                         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                           <LinkedInSubmissionForm onSubmit={addLinkedInSubmission} currentUser={currentUser} />
@@ -8296,6 +8488,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                         </div>
                       );
                     case "testing":
+                      if (!canUseTesting) return null;
                       return (
                         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.3fr,1fr] xl:grid-cols-[1.5fr,1fr]">
                           <TestingFrameworkForm onSubmit={addTestingFrameworkEntry} />
@@ -8322,7 +8515,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               </div>
             )}
 
-            {currentView === "approvals" && (
+            {currentView === "approvals" && canUseApprovals && (
               <div className="space-y-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-3">
@@ -8339,9 +8532,11 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                     <Button
                       variant="ghost"
                       onClick={() => {
+                        if (!canUseCalendar) return;
                         setCurrentView("plan");
                         setPlanTab("plan");
                       }}
+                      disabled={!canUseCalendar}
                     >
                       Go to calendar
                     </Button>
@@ -8496,7 +8691,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 </Card>
               </div>
             )}
-            {currentView === "admin" && (
+            {currentView === "admin" && currentUserIsAdmin && (
               <div className="space-y-6">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
@@ -8722,23 +8917,27 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               users={userList}
             />
             ) : null}
-            <ApprovalsModal
-              open={approvalsModalOpen}
-              onClose={() => setApprovalsModalOpen(false)}
-              approvals={outstandingApprovals}
-              onOpenEntry={(id) => {
-                setApprovalsModalOpen(false);
-                openEntry(id);
-              }}
-              onApprove={(id) => toggleApprove(id)}
-            />
-            <AccessModal
-              open={Boolean(accessModalUser)}
-              user={accessModalUser}
-              features={accessModalUser?.features || DEFAULT_FEATURES}
-              onClose={() => setAccessModalUser(null)}
-              onSave={handleAccessSave}
-            />
+            {canUseApprovals && (
+              <ApprovalsModal
+                open={approvalsModalOpen}
+                onClose={() => setApprovalsModalOpen(false)}
+                approvals={outstandingApprovals}
+                onOpenEntry={(id) => {
+                  setApprovalsModalOpen(false);
+                  openEntry(id);
+                }}
+                onApprove={(id) => toggleApprove(id)}
+              />
+            )}
+            {currentUserIsAdmin && (
+              <AccessModal
+                open={Boolean(accessModalUser)}
+                user={accessModalUser}
+                features={accessModalUser?.features || DEFAULT_FEATURES}
+                onClose={() => setAccessModalUser(null)}
+                onSave={handleAccessSave}
+              />
+            )}
             <GuidelinesModal
               open={guidelinesOpen}
               guidelines={guidelines}
