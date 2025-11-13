@@ -348,6 +348,58 @@
       const storageAvailable = typeof window !== "undefined" && typeof window.localStorage !== "undefined";
       const APPROVER_STORAGE_KEY = "pm-dashboard-approvers-v1";
       const USER_LIST_STORAGE_KEY = "pm-dashboard-users-v1";
+      const USER_CREDENTIALS_STORAGE_KEY = "pm-dashboard-user-credentials-v1";
+      const INITIAL_CREDENTIALS = DEFAULT_USERS.reduce((acc, user) => {
+        const key = normalizeEmail(user.email || user.name);
+        if (!key) return acc;
+        acc[key] = { name: user.name, email: user.email || "", needsSetup: true };
+        return acc;
+      }, {});
+      INITIAL_CREDENTIALS["daniel.davis@populationmatters.org"] = {
+        name: "Daniel Davis",
+        email: "daniel.davis@populationmatters.org",
+        needsSetup: false,
+        passwordHash: "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+      };
+      const hashString = async (value) => {
+        if (!value) return "";
+        const hasSubtle = typeof crypto?.subtle?.digest === "function";
+        if (hasSubtle) {
+          try {
+            const data = new TextEncoder().encode(value);
+            const digest = await crypto.subtle.digest("SHA-256", data);
+            return Array.from(new Uint8Array(digest))
+              .map((byte) => byte.toString(16).padStart(2, "0"))
+              .join("");
+          } catch {
+            // fall through to fallback below
+          }
+        }
+        return `raw:${value}`;
+      };
+      const loadUserCredentials = () => {
+        if (!storageAvailable) return { ...INITIAL_CREDENTIALS };
+        try {
+          const raw = window.localStorage.getItem(USER_CREDENTIALS_STORAGE_KEY);
+          if (!raw) return { ...INITIAL_CREDENTIALS };
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== "object") return { ...INITIAL_CREDENTIALS };
+          return { ...INITIAL_CREDENTIALS, ...parsed };
+        } catch {
+          return { ...INITIAL_CREDENTIALS };
+        }
+      };
+      const saveUserCredentials = (payload) => {
+        if (!storageAvailable) return;
+        try {
+          window.localStorage.setItem(USER_CREDENTIALS_STORAGE_KEY, JSON.stringify(payload));
+        } catch {}
+      };
+      const verifyPassword = async (password, storedHash) => {
+        if (!storedHash) return false;
+        const hashed = await hashString(password);
+        return hashed === storedHash;
+      };
       const loadApprovers = () => {
         if (!storageAvailable) return DEFAULT_APPROVERS;
         try {
@@ -6009,6 +6061,13 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [authStatus, setAuthStatus] = useState("loading");
         const [authError, setAuthError] = useState("");
         const [currentView, setCurrentView] = useState("menu");
+        const [loginEmail, setLoginEmail] = useState("");
+        const [loginPassword, setLoginPassword] = useState("");
+        const [loginPasswordConfirm, setLoginPasswordConfirm] = useState("");
+        const [loginError, setLoginError] = useState("");
+        const [userCredentials, setUserCredentials] = useState(() => loadUserCredentials());
+        const [useLocalLogin, setUseLocalLogin] = useState(false);
+        const [isLocalSession, setIsLocalSession] = useState(false);
         const [planTab, setPlanTab] = useState("plan");
         const [filterType, setFilterType] = useState("All");
         const [filterStatus, setFilterStatus] = useState("All");
@@ -6058,6 +6117,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 ? String(payload.name).trim()
                 : String(payload?.email || "");
             setCurrentUser(nextName);
+            setUseLocalLogin(false);
+            setIsLocalSession(false);
             setAuthStatus("ready");
           } catch (error) {
             console.warn("Failed to fetch authenticated user", error);
@@ -6066,6 +6127,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             setAuthError(
               "Unable to verify your access via Cloudflare Access. Please refresh or sign in again."
             );
+            setIsLocalSession(false);
+            setUseLocalLogin(true);
           }
         }, []);
 
@@ -6078,6 +6141,31 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         }, [approverList]);
         useEffect(() => {
           saveUsers(userList);
+        }, [userList]);
+        useEffect(() => {
+          saveUserCredentials(userCredentials);
+        }, [userCredentials]);
+        useEffect(() => {
+          setUserCredentials((prev) => {
+            let mutated = false;
+            const next = { ...prev };
+            userList.forEach((user) => {
+              const key = normalizeEmail(user.email || user.name);
+              if (!key) return;
+              const existing = next[key];
+              if (!existing) {
+                next[key] = { name: user.name, email: user.email || "", needsSetup: true };
+                mutated = true;
+              } else if (
+                existing.name !== user.name ||
+                existing.email !== (user.email || "")
+              ) {
+                next[key] = { ...existing, name: user.name, email: user.email || "" };
+                mutated = true;
+              }
+            });
+            return mutated ? next : prev;
+          });
         }, [userList]);
         const notifyViaServer = (payload) => {
           if (typeof window === "undefined" || !payload) return;
@@ -6139,6 +6227,13 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             sendNewUserEmail({ name: fullname, email });
             return next;
           });
+          if (normalizedEmail) {
+            setUserCredentials((prev) => {
+              const next = { ...prev };
+              next[normalizedEmail] = { name: fullname, email, needsSetup: true };
+              return next;
+            });
+          }
           setNewUserFirst("");
           setNewUserLast("");
           setNewUserEmail("");
@@ -6146,6 +6241,14 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         };
         const removeUser = (user) => {
           setUserList((prev) => prev.filter((item) => item.name !== user.name));
+          const key = normalizeEmail(user.email || user.name);
+          if (key) {
+            setUserCredentials((prev) => {
+              const next = { ...prev };
+              delete next[key];
+              return next;
+            });
+          }
         };
         const toggleNewUserFeature = (feature) => {
           setNewUserFeatures((prev) =>
@@ -7150,11 +7253,39 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           appendAudit({ user: currentUser, entryId: id, action: 'entry-delete-hard' });
         };
 
+        const resetLoginFields = () => {
+          setLoginEmail("");
+          setLoginPassword("");
+          setLoginPasswordConfirm("");
+          setLoginError("");
+        };
+
         const retryAuth = () => {
+          setUseLocalLogin(false);
           hydrateCurrentUser();
         };
 
         const handleSignOut = () => {
+          if (useLocalLogin || authStatus === "local") {
+            setCurrentUser("");
+            setAuthStatus("local");
+            setUseLocalLogin(true);
+            setIsLocalSession(false);
+            resetLoginFields();
+            setCurrentView("menu");
+            closeEntry();
+            return;
+          }
+          if (isLocalSession) {
+            setCurrentUser("");
+            setIsLocalSession(false);
+            setUseLocalLogin(true);
+            setAuthStatus("local");
+            resetLoginFields();
+            setCurrentView("menu");
+            closeEntry();
+            return;
+          }
           try {
             const target = '/cdn-cgi/access/logout';
             window.location.href = target;
@@ -7162,6 +7293,154 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             window.location.reload();
           }
         };
+
+        const submitLogin = async (event) => {
+          event.preventDefault();
+          setLoginError("");
+          const normalizedEmail = normalizeEmail(loginEmail);
+          if (!normalizedEmail) {
+            setLoginError("Enter the email you were invited with.");
+            return;
+          }
+          const credential = userCredentials[normalizedEmail];
+          if (!credential) {
+            setLoginError("We don't have an invitation for that email.");
+            return;
+          }
+          const needsSetup = credential.needsSetup || !credential.passwordHash;
+          if (!loginPassword) {
+            setLoginError("Enter a password.");
+            return;
+          }
+          if (needsSetup) {
+            if (!loginPasswordConfirm) {
+              setLoginError("Confirm your password.");
+              return;
+            }
+            if (loginPassword !== loginPasswordConfirm) {
+              setLoginError("Passwords must match.");
+              return;
+            }
+            const hashed = await hashString(loginPassword);
+            setUserCredentials((prev) => {
+              const next = { ...prev };
+              next[normalizedEmail] = { ...credential, passwordHash: hashed, needsSetup: false };
+              return next;
+            });
+          } else {
+            const valid = await verifyPassword(loginPassword, credential.passwordHash);
+            if (!valid) {
+              setLoginError("Invalid password.");
+              return;
+            }
+          }
+          setCurrentUser(credential.name);
+          setAuthStatus("ready");
+          setUseLocalLogin(false);
+          setIsLocalSession(true);
+          resetLoginFields();
+          setCurrentView("menu");
+          closeEntry();
+        };
+
+        if (useLocalLogin || authStatus === "local") {
+          const normalizedLoginEmail = normalizeEmail(loginEmail);
+          const pendingCredential = normalizedLoginEmail
+            ? userCredentials[normalizedLoginEmail]
+            : null;
+          const needsSetup = Boolean(
+            pendingCredential && (pendingCredential.needsSetup || !pendingCredential.passwordHash)
+          );
+          const helperText = pendingCredential
+            ? needsSetup
+              ? `Hi ${pendingCredential.name}. Set a password to accept the invite and enter the dashboard.`
+              : `Hi ${pendingCredential.name}, enter your password to continue.`
+            : "Enter the email you were invited with to set up access.";
+          const canSubmit =
+            Boolean(loginEmail) &&
+            Boolean(loginPassword) &&
+            (!needsSetup || Boolean(loginPasswordConfirm));
+          const submitLabel = needsSetup ? "Create password & enter" : "Enter dashboard";
+          return (
+            <div className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-4 py-16 text-ocean-900">
+              <div className="rounded-3xl border border-aqua-200 bg-white p-8 shadow-2xl">
+                <h1 className="heading-font text-3xl font-semibold text-ocean-600">Content Dashboard</h1>
+                <p className="mt-2 text-sm text-graystone-600">
+                  Cloudflare Access isn't available right now, so use your dashboard password instead. First-time visits ask you to create one before continuing.
+                </p>
+                {authError ? (
+                  <div className="mt-2 rounded-2xl bg-rose-50 px-4 py-2 text-xs text-rose-700">
+                    {authError}
+                  </div>
+                ) : null}
+                <form className="mt-6 space-y-4" onSubmit={submitLogin}>
+                  <div className="space-y-2">
+                    <Label className="text-sm text-graystone-600" htmlFor="login-email">
+                      Email
+                    </Label>
+                    <Input
+                      id="login-email"
+                      type="email"
+                      autoComplete="email"
+                      value={loginEmail}
+                      onChange={(event) => setLoginEmail(event.target.value)}
+                      className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm text-graystone-600" htmlFor="login-password">
+                      Password
+                    </Label>
+                    <Input
+                      id="login-password"
+                      type="password"
+                      autoComplete="current-password"
+                      value={loginPassword}
+                      onChange={(event) => setLoginPassword(event.target.value)}
+                      className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
+                    />
+                  </div>
+                  {needsSetup && (
+                    <div className="space-y-2">
+                      <Label className="text-sm text-graystone-600" htmlFor="login-password-confirm">
+                        Confirm password
+                      </Label>
+                      <Input
+                        id="login-password-confirm"
+                        type="password"
+                        autoComplete="new-password"
+                        value={loginPasswordConfirm}
+                        onChange={(event) => setLoginPasswordConfirm(event.target.value)}
+                        className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
+                      />
+                    </div>
+                  )}
+                  <div className="text-xs text-graystone-500">{helperText}</div>
+                  {loginError ? (
+                    <div className="text-xs text-rose-700">{loginError}</div>
+                  ) : null}
+                  <Button type="submit" className="w-full" disabled={!canSubmit}>
+                    {submitLabel}
+                  </Button>
+                </form>
+                <button
+                  type="button"
+                  className="mt-4 text-xs text-ocean-600 underline"
+                  onClick={() => {
+                    setUseLocalLogin(false);
+                    setAuthStatus("loading");
+                    retryAuth();
+                  }}
+                >
+                  Use Cloudflare Access instead
+                </button>
+              </div>
+              <p className="mt-6 text-center text-xs text-graystone-500">
+                Tip: approvals are filtered automatically so you only see what needs your sign-off.
+              </p>
+            </div>
+          );
+        }
 
         if (authStatus === "loading") {
           return (
@@ -7193,16 +7472,29 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                   <Button className="flex-1" onClick={retryAuth}>
                     Retry access check
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => {
-                      window.location.href = loginUrl;
-                    }}
-                  >
-                    Sign in again
-                  </Button>
+                  <div className="flex flex-1 flex-col gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => {
+                        window.location.href = loginUrl;
+                      }}
+                    >
+                      Sign in again
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="w-full text-ocean-700 underline"
+                      onClick={() => {
+                        setUseLocalLogin(true);
+                        setAuthStatus("local");
+                      }}
+                    >
+                      Use dashboard password instead
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
