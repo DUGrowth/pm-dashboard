@@ -16,15 +16,14 @@
     const runChecks = async () => {
       setLoading(true);
       setError('');
-      const next = {};
       try {
-        for (const platform of selectedPlatforms) {
+        const tasks = selectedPlatforms.map(async (platform) => {
           const maxChars = safeGuidelines?.charLimits?.[platform] ?? 280;
-      const effectiveAssetType = assetType === 'No asset' ? 'Design' : assetType;
-      const payload = {
-        text: getPlatformCaption(caption, platformCaptions, platform),
-        platform,
-        assetType: effectiveAssetType,
+          const effectiveAssetType = assetType === 'No asset' ? 'Design' : assetType;
+          const payload = {
+            text: getPlatformCaption(caption, platformCaptions, platform),
+            platform,
+            assetType: effectiveAssetType,
             readingLevelTarget: 'Grade 7',
             constraints: { maxChars, maxHashtags: 10, requireCTA: true },
             brand: {
@@ -48,9 +47,26 @@
             }
             json = await res.json();
           }
-          next[platform] = json;
+          return { platform, data: json };
+        });
+        const settled = await Promise.allSettled(tasks);
+        const successes = {};
+        const failures = [];
+        settled.forEach((result) => {
+          if (result.status === 'fulfilled') {
+            successes[result.value.platform] = result.value.data;
+          } else {
+            failures.push(result.reason);
+          }
+        });
+        if (Object.keys(successes).length) {
+          setResults((prev) => ({ ...prev, ...successes }));
         }
-        setResults(next);
+        if (failures.length) {
+          setError(`Copy check failed for ${failures.length} platform${failures.length > 1 ? 's' : ''}.`);
+        } else {
+          setError('');
+        }
       } catch (e) {
         setError(e?.message || 'Copy check failed');
       } finally {

@@ -136,7 +136,7 @@
     <script type="text/babel" data-presets="env,react" src="/public/js/components/copyCheckSection.jsx"></script>
 
     <script type="text/babel" data-presets="env,react">
-      const { useState, useMemo, useEffect } = React;
+      const { useState, useMemo, useEffect, useCallback } = React;
 
       const ASSET_TYPES = ["No asset", "Video", "Design", "Carousel"];
       const IDEA_TYPES = ["Topic", "Theme", "Series", "Campaign", "Other"];
@@ -231,21 +231,6 @@
       const normalizeEmail = (value) => {
         if (!value) return "";
         return String(value).trim().toLowerCase();
-      };
-
-      const USER_CREDENTIALS_STORAGE_KEY = "pm-dashboard-user-credentials-v1";
-
-      const INITIAL_CREDENTIALS = DEFAULT_USERS.reduce((acc, user) => {
-        const key = normalizeEmail(user.email || user.name);
-        if (!key) return acc;
-        acc[key] = { name: user.name, email: user.email || "", needsSetup: true };
-        return acc;
-      }, {});
-      INITIAL_CREDENTIALS["daniel.davis@populationmatters.org"] = {
-        name: "Daniel Davis",
-        email: "daniel.davis@populationmatters.org",
-        needsSetup: false,
-        passwordHash: "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
       };
 
       const WORKFLOW_STAGES = [
@@ -363,45 +348,6 @@
       const storageAvailable = typeof window !== "undefined" && typeof window.localStorage !== "undefined";
       const APPROVER_STORAGE_KEY = "pm-dashboard-approvers-v1";
       const USER_LIST_STORAGE_KEY = "pm-dashboard-users-v1";
-      const hashString = async (value) => {
-        if (!value) return "";
-        const hasSubtle = typeof crypto?.subtle?.digest === "function";
-        if (hasSubtle) {
-          try {
-            const data = new TextEncoder().encode(value);
-            const digest = await crypto.subtle.digest("SHA-256", data);
-            return Array.from(new Uint8Array(digest))
-              .map((byte) => byte.toString(16).padStart(2, "0"))
-              .join("");
-          } catch {
-            // fall through to fallback below
-          }
-        }
-        return `raw:${value}`;
-      };
-      const loadUserCredentials = () => {
-        if (!storageAvailable) return { ...INITIAL_CREDENTIALS };
-        try {
-          const raw = window.localStorage.getItem(USER_CREDENTIALS_STORAGE_KEY);
-          if (!raw) return { ...INITIAL_CREDENTIALS };
-          const parsed = JSON.parse(raw);
-          if (!parsed || typeof parsed !== "object") return { ...INITIAL_CREDENTIALS };
-          return { ...INITIAL_CREDENTIALS, ...parsed };
-        } catch {
-          return { ...INITIAL_CREDENTIALS };
-        }
-      };
-      const saveUserCredentials = (payload) => {
-        if (!storageAvailable) return;
-        try {
-          window.localStorage.setItem(USER_CREDENTIALS_STORAGE_KEY, JSON.stringify(payload));
-        } catch {}
-      };
-      const verifyPassword = async (password, storedHash) => {
-        if (!storedHash) return false;
-        const hashed = await hashString(password);
-        return hashed === storedHash;
-      };
       const loadApprovers = () => {
         if (!storageAvailable) return DEFAULT_APPROVERS;
         try {
@@ -854,7 +800,7 @@
 
       const extractMentions = (text) => {
         if (!text) return [];
-        const matches = text.match(/@([\w\s.&'-]+)/g);
+        const matches = text.match(/@([A-Z][\w.&'-]*(?:\s+[A-Z][\w.&'-]*){0,2})/g);
         if (!matches) return [];
         return Array.from(new Set(matches.map((token) => token.trim())));
       };
@@ -6058,19 +6004,11 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [adminAudits, setAdminAudits] = useState([]);
         const [selectedFrameworkId, setSelectedFrameworkId] = useState("");
         const [currentUser, setCurrentUser] = useState(() =>
-          storageAvailable ? window.localStorage.getItem(USER_STORAGE_KEY) : null
+          storageAvailable ? window.localStorage.getItem(USER_STORAGE_KEY) || "" : ""
         );
-        const [loginEmail, setLoginEmail] = useState("");
-        const [loginPassword, setLoginPassword] = useState("");
-        const [loginPasswordConfirm, setLoginPasswordConfirm] = useState("");
-        const [loginError, setLoginError] = useState("");
-        const [userCredentials, setUserCredentials] = useState(() => loadUserCredentials());
-        const [currentView, setCurrentView] = useState(() => {
-          if (storageAvailable) {
-            return window.localStorage.getItem(USER_STORAGE_KEY) ? "menu" : "login";
-          }
-          return "login";
-        });
+        const [authStatus, setAuthStatus] = useState("loading");
+        const [authError, setAuthError] = useState("");
+        const [currentView, setCurrentView] = useState("menu");
         const [planTab, setPlanTab] = useState("plan");
         const [filterType, setFilterType] = useState("All");
         const [filterStatus, setFilterStatus] = useState("All");
@@ -6103,36 +6041,43 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             return '';
           }
         });
+        const hydrateCurrentUser = useCallback(async () => {
+          setAuthStatus("loading");
+          setAuthError("");
+          try {
+            let payload = null;
+            if (window.api && window.api.enabled && window.api.getCurrentUser) {
+              payload = await window.api.getCurrentUser();
+            } else {
+              const res = await fetch("/api/user", { method: "GET" });
+              if (!res.ok) throw new Error(`AUTH_HTTP_${res.status}`);
+              payload = await res.json();
+            }
+            const nextName =
+              payload?.name && String(payload.name).trim().length
+                ? String(payload.name).trim()
+                : String(payload?.email || "");
+            setCurrentUser(nextName);
+            setAuthStatus("ready");
+          } catch (error) {
+            console.warn("Failed to fetch authenticated user", error);
+            setCurrentUser("");
+            setAuthStatus("error");
+            setAuthError(
+              "Unable to verify your access via Cloudflare Access. Please refresh or sign in again."
+            );
+          }
+        }, []);
+
+        useEffect(() => {
+          hydrateCurrentUser();
+        }, [hydrateCurrentUser]);
+
         useEffect(() => {
           saveApprovers(approverList);
         }, [approverList]);
         useEffect(() => {
           saveUsers(userList);
-        }, [userList]);
-        useEffect(() => {
-          saveUserCredentials(userCredentials);
-        }, [userCredentials]);
-        useEffect(() => {
-          setUserCredentials((prev) => {
-            let mutated = false;
-            const next = { ...prev };
-            userList.forEach((user) => {
-              const key = normalizeEmail(user.email || user.name);
-              if (!key) return;
-              const existing = next[key];
-              if (!existing) {
-                next[key] = { name: user.name, email: user.email || "", needsSetup: true };
-                mutated = true;
-              } else if (
-                existing.name !== user.name ||
-                existing.email !== (user.email || "")
-              ) {
-                next[key] = { ...existing, name: user.name, email: user.email || "" };
-                mutated = true;
-              }
-            });
-            return mutated ? next : prev;
-          });
         }, [userList]);
         const notifyViaServer = (payload) => {
           if (typeof window === "undefined" || !payload) return;
@@ -6158,7 +6103,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const sendNewUserEmail = (user) => {
           if (!user || !user.email) return;
           const subject = "PM Dashboard access granted";
-          const text = `Hi ${user.name},\n\nYou've been invited to the Population Matters PM Dashboard. Visit ${window.location.origin}, enter ${user.email}, and follow the prompts to set a password before jumping in.\n\nIf you weren't expecting this, please reach out to the comms team.`;
+          const text = `Hi ${user.name},\n\nYou've been invited to the Population Matters PM Dashboard. Visit ${window.location.origin} and sign in with your Population Matters account via Cloudflare Access. Once Zero Trust lets you through, you'll land directly in the dashboard—no extra password needed.\n\nIf you weren't expecting this, please reach out to the comms team.`;
           notifyViaServer({ to: [user.email], subject, text });
         };
         const addApprover = () => {
@@ -6194,13 +6139,6 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             sendNewUserEmail({ name: fullname, email });
             return next;
           });
-          if (normalizedEmail) {
-            setUserCredentials((prev) => {
-              const next = { ...prev };
-              next[normalizedEmail] = { name: fullname, email, needsSetup: true };
-              return next;
-            });
-          }
           setNewUserFirst("");
           setNewUserLast("");
           setNewUserEmail("");
@@ -6208,14 +6146,6 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         };
         const removeUser = (user) => {
           setUserList((prev) => prev.filter((item) => item.name !== user.name));
-          const key = normalizeEmail(user.email || user.name);
-          if (key) {
-            setUserCredentials((prev) => {
-              const next = { ...prev };
-              delete next[key];
-              return next;
-            });
-          }
         };
         const toggleNewUserFeature = (feature) => {
           setNewUserFeatures((prev) =>
@@ -6907,14 +6837,14 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
 
         useEffect(() => {
           if (!deepLinkEntryId) return;
-          if (currentView === 'login') return;
+          if (authStatus !== 'ready') return;
           const existing = entries.find((entry) => entry.id === deepLinkEntryId);
           if (existing) {
             openEntry(deepLinkEntryId);
             clearEntryQueryParam();
             setDeepLinkEntryId('');
           }
-        }, [deepLinkEntryId, entries, currentView]);
+        }, [deepLinkEntryId, entries, authStatus]);
 
         const addEntry = (data) => {
           const timestamp = new Date().toISOString();
@@ -7220,145 +7150,61 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           appendAudit({ user: currentUser, entryId: id, action: 'entry-delete-hard' });
         };
 
-        const resetLoginFields = () => {
-          setLoginEmail("");
-          setLoginPassword("");
-          setLoginPasswordConfirm("");
-          setLoginError("");
+        const retryAuth = () => {
+          hydrateCurrentUser();
         };
 
         const handleSignOut = () => {
-          setCurrentUser(null);
-          resetLoginFields();
-          setCurrentView("login");
-          closeEntry();
+          try {
+            const target = '/cdn-cgi/access/logout';
+            window.location.href = target;
+          } catch {
+            window.location.reload();
+          }
         };
 
-        const submitLogin = async (event) => {
-          event.preventDefault();
-          setLoginError("");
-          const normalizedEmail = normalizeEmail(loginEmail);
-          if (!normalizedEmail) {
-            setLoginError("Enter the email you were invited with.");
-            return;
-          }
-          const credential = userCredentials[normalizedEmail];
-          if (!credential) {
-            setLoginError("We don't have an invitation for that email.");
-            return;
-          }
-          const needsSetup = credential.needsSetup || !credential.passwordHash;
-          if (!loginPassword) {
-            setLoginError("Enter a password.");
-            return;
-          }
-          if (needsSetup) {
-            if (!loginPasswordConfirm) {
-              setLoginError("Confirm your password.");
-              return;
-            }
-            if (loginPassword !== loginPasswordConfirm) {
-              setLoginError("Passwords must match.");
-              return;
-            }
-            const hashed = await hashString(loginPassword);
-            setUserCredentials((prev) => {
-              const next = { ...prev };
-              next[normalizedEmail] = { ...credential, passwordHash: hashed, needsSetup: false };
-              return next;
-            });
-          } else {
-            const valid = await verifyPassword(loginPassword, credential.passwordHash);
-            if (!valid) {
-              setLoginError("Invalid password.");
-              return;
-            }
-          }
-          setCurrentUser(credential.name);
-          resetLoginFields();
-          setCurrentView("menu");
-          closeEntry();
-        };
-
-        if (currentView === "login") {
-          const normalizedLoginEmail = normalizeEmail(loginEmail);
-          const pendingCredential = normalizedLoginEmail
-            ? userCredentials[normalizedLoginEmail]
-            : null;
-          const needsSetup = Boolean(
-            pendingCredential && (pendingCredential.needsSetup || !pendingCredential.passwordHash)
-          );
-          const helperText = pendingCredential
-            ? needsSetup
-              ? `Hi ${pendingCredential.name}. Set a password to accept the invite and enter the dashboard.`
-              : `Hi ${pendingCredential.name}, enter your password to continue.`
-            : "Enter the email you were invited with to set up access.";
-          const canSubmit =
-            Boolean(loginEmail) &&
-            Boolean(loginPassword) &&
-            (!needsSetup || Boolean(loginPasswordConfirm));
-          const submitLabel = needsSetup ? "Create password & enter" : "Enter dashboard";
+        if (authStatus === "loading") {
           return (
             <div className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-4 py-16 text-ocean-900">
-              <div className="rounded-3xl border border-aqua-200 bg-white p-8 shadow-2xl">
-                <h1 className="heading-font text-3xl font-semibold text-ocean-600">Content Dashboard</h1>
-                <p className="mt-2 text-sm text-graystone-600">
-                  Use the email you were invited with. First-time visits ask you to choose a password before you can access planning and approvals.
+              <div className="rounded-3xl border border-aqua-200 bg-white p-8 text-center shadow-2xl">
+                <div className="heading-font text-3xl font-semibold text-ocean-600">Checking access…</div>
+                <p className="mt-4 text-sm text-graystone-600">
+                  Verifying your Cloudflare Access session so we can load the dashboard.
                 </p>
-                <form className="mt-6 space-y-4" onSubmit={submitLogin}>
-                  <div className="space-y-2">
-                    <Label className="text-sm text-graystone-600" htmlFor="login-email">
-                      Email
-                    </Label>
-                    <Input
-                      id="login-email"
-                      type="email"
-                      autoComplete="email"
-                      value={loginEmail}
-                      onChange={(event) => setLoginEmail(event.target.value)}
-                      className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-sm text-graystone-600" htmlFor="login-password">
-                      Password
-                    </Label>
-                    <Input
-                      id="login-password"
-                      type="password"
-                      autoComplete="current-password"
-                      value={loginPassword}
-                      onChange={(event) => setLoginPassword(event.target.value)}
-                      className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
-                    />
-                  </div>
-                  {needsSetup && (
-                    <div className="space-y-2">
-                      <Label className="text-sm text-graystone-600" htmlFor="login-password-confirm">
-                        Confirm password
-                      </Label>
-                      <Input
-                        id="login-password-confirm"
-                        type="password"
-                        autoComplete="new-password"
-                        value={loginPasswordConfirm}
-                        onChange={(event) => setLoginPasswordConfirm(event.target.value)}
-                        className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
-                      />
-                    </div>
-                  )}
-                  <div className="text-xs text-graystone-500">{helperText}</div>
-                  {loginError ? (
-                    <div className="text-xs text-rose-700">{loginError}</div>
-                  ) : null}
-                  <Button type="submit" className="w-full" disabled={!canSubmit}>
-                    {submitLabel}
-                  </Button>
-                </form>
+                <div className="mt-6 animate-pulse rounded-2xl bg-aqua-100 px-4 py-3 text-sm text-ocean-700">
+                  Hang tight—this only takes a moment.
+                </div>
               </div>
-              <p className="mt-6 text-center text-xs text-graystone-500">
-                Tip: approvals are filtered automatically so you only see what needs your sign-off.
-              </p>
+            </div>
+          );
+        }
+
+        if (authStatus === "error" || !currentUser) {
+          const loginUrl = `/cdn-cgi/access/login?redirect_url=${encodeURIComponent(window.location.href)}`;
+          return (
+            <div className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-4 py-16 text-ocean-900">
+              <div className="rounded-3xl border border-rose-200 bg-white p-8 shadow-2xl">
+                <h1 className="heading-font text-3xl font-semibold text-rose-600">Access required</h1>
+                <p className="mt-4 text-sm text-graystone-600">
+                  {authError ||
+                    "We couldn't confirm your Cloudflare Access session. Refresh the page or sign in again to continue."}
+                </p>
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                  <Button className="flex-1" onClick={retryAuth}>
+                    Retry access check
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      window.location.href = loginUrl;
+                    }}
+                  >
+                    Sign in again
+                  </Button>
+                </div>
+              </div>
             </div>
           );
         }

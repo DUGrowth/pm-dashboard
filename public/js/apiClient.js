@@ -164,6 +164,11 @@ async function saveGuidelinesRemote(body) {
   return toJson(r);
 }
 
+async function getCurrentUser() {
+  const r = await fetch('/api/user', { method: 'GET' });
+  return toJson(r);
+}
+
 (async () => {
   const enabled = await pingServer();
   try {
@@ -190,6 +195,7 @@ async function saveGuidelinesRemote(body) {
         logAudit,
         getGuidelines,
         saveGuidelines: saveGuidelinesRemote,
+        getCurrentUser,
       });
       try {
         window.dispatchEvent(new CustomEvent('pm-api-ready', { detail: { enabled } }));

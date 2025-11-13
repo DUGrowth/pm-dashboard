@@ -44,22 +44,37 @@ const getSystemPrompt = (platform: string) => {
   return platformPrompt ? `${BASE_SYSTEM_PROMPT}\n${platformPrompt}` : BASE_SYSTEM_PROMPT;
 };
 
-// Simple token-bucket RL per IP
-const RL = new Map<string, { tokens: number; ts: number }>();
+// Simple token-bucket RL per IP (with idle cleanup)
+const RL = new Map<string, { tokens: number; ts: number; seen: number }>();
 function rateLimit(ip: string, limit = 20, interval = 60_000) {
   const now = Date.now();
-  const b = RL.get(ip) || { tokens: limit, ts: now };
-  const refill = Math.floor(((now - b.ts) / interval) * limit);
-  if (refill > 0) {
-    b.tokens = Math.min(limit, b.tokens + refill);
-    b.ts = now;
+  let bucket = RL.get(ip);
+  if (!bucket) {
+    bucket = { tokens: limit, ts: now, seen: now };
+    RL.set(ip, bucket);
+  } else {
+    const elapsed = now - bucket.ts;
+    if (elapsed > 0) {
+      const refill = Math.floor((elapsed / interval) * limit);
+      if (refill > 0) {
+        bucket.tokens = Math.min(limit, bucket.tokens + refill);
+        bucket.ts = now;
+        if (bucket.tokens === limit && now - bucket.seen > interval * 5) {
+          RL.delete(ip);
+          bucket = { tokens: limit, ts: now, seen: now };
+          RL.set(ip, bucket);
+        }
+      }
+    }
   }
-  if (b.tokens <= 0) {
-    RL.set(ip, b);
+  if (bucket.tokens <= 0) {
+    bucket.seen = now;
+    RL.set(ip, bucket);
     return false;
   }
-  b.tokens -= 1;
-  RL.set(ip, b);
+  bucket.tokens -= 1;
+  bucket.seen = now;
+  RL.set(ip, bucket);
   return true;
 }
 
@@ -102,11 +117,20 @@ function enforceHashtags(text: string, max?: number) {
     })
     .join('');
 }
-function ensureRequired(text: string, phrases: string[]) {
+function ensureRequired(text: string, phrases: string[], limit?: number, urls: string[] = []) {
   let out = text;
   for (const p of phrases || []) {
     if (!p) continue;
-    if (!new RegExp(escapeRegExp(p), 'i').test(out)) out = `${out} ${p}`.trim();
+    if (new RegExp(escapeRegExp(p), 'i').test(out)) continue;
+    const candidate = `${p} ${out}`.trim();
+    if (limit && limit > 0) {
+      out = trimTo(candidate, limit, urls, phrases);
+      if (!new RegExp(escapeRegExp(p), 'i').test(out)) {
+        out = p.length > limit ? p.slice(0, limit) : p;
+      }
+    } else {
+      out = candidate;
+    }
   }
   return out;
 }
@@ -119,17 +143,66 @@ function removeBanned(text: string, words: string[]) {
   }
   return out.trim();
 }
-function trimTo(text: string, limit: number, urls: string[]) {
+function trimTo(
+  text: string,
+  limit: number,
+  urls: string[],
+  preservePhrases: string[] = [],
+) {
   if (text.length <= limit) return text;
-  let t = text.slice(0, limit);
-  const lastSpace = t.lastIndexOf(' ');
-  if (lastSpace > limit - 20) t = t.slice(0, lastSpace);
-  // try to preserve at least one URL if present
-  for (const u of urls) {
-    if (!t.includes(u)) t = `${t.trim()} ${u}`.trim();
+  const phrases = (preservePhrases || []).filter(Boolean);
+  const hasPhrase = (candidate: string, phrase: string) =>
+    new RegExp(escapeRegExp(phrase), 'i').test(candidate);
+  const canDrop = (current: string, next: string) =>
+    phrases.every((phrase) => !hasPhrase(current, phrase) || hasPhrase(next, phrase));
+  const dropTrailing = (current: string, targetLength: number) => {
+    if (!current) return '';
+    if (targetLength < 0) return '';
+    let candidate = current.trim();
+    while (candidate && candidate.length > targetLength) {
+      const idx = candidate.lastIndexOf(' ');
+      if (idx === -1) return '';
+      const next = candidate.slice(0, idx).trim();
+      if (!next) return '';
+      if (!canDrop(candidate, next)) break;
+      candidate = next;
+    }
+    return candidate;
+  };
+
+  let working = text.slice(0, limit).trim();
+  const lastSpace = working.lastIndexOf(' ');
+  if (lastSpace > limit - 20) {
+    const sliced = working.slice(0, lastSpace).trim();
+    if (sliced) working = sliced;
   }
-  if (t.length > limit) t = `${t.slice(0, limit - 1)}…`;
-  return t;
+  working = dropTrailing(working, limit) || working.slice(0, limit).trim();
+
+  const ensureContains = (base: string, snippet: string) => {
+    if (!snippet || snippet.length > limit) return base;
+    if (base.includes(snippet)) return base;
+    let candidate = base.trim();
+    const addLength = snippet.length + (candidate ? 1 : 0);
+    if (candidate.length + addLength > limit) {
+      const trimmed = dropTrailing(candidate, limit - addLength);
+      if (!trimmed) {
+        return snippet.length > limit ? snippet.slice(0, limit) : snippet;
+      }
+      if (trimmed.length + addLength > limit) return candidate;
+      candidate = trimmed;
+    }
+    return candidate ? `${candidate} ${snippet}`.trim() : snippet;
+  };
+
+  for (const url of urls) {
+    working = ensureContains(working, url);
+  }
+
+  if (working.length > limit) {
+    working = dropTrailing(working, limit) || working.slice(0, limit).trim();
+  }
+
+  return working;
 }
 
 function postValidate(result: any, input: any) {
@@ -142,7 +215,8 @@ function postValidate(result: any, input: any) {
   work = ensureRequired(work, brand.requiredPhrases || []);
   work = enforceHashtags(work, c.maxHashtags);
   work = restoreUrls(work, urls);
-  work = trimTo(work, c.maxChars || 280, urls);
+  work = trimTo(work, c.maxChars || 280, urls, brand.requiredPhrases || []);
+  work = ensureRequired(work, brand.requiredPhrases || [], c.maxChars || 280, urls);
   const suggestion = { text: work };
   const score =
     result?.score || {
@@ -164,10 +238,17 @@ function postValidate(result: any, input: any) {
           ),
           c.maxChars || 280,
           variantUrls,
+          brand.requiredPhrases || [],
+        );
+        const ensured = ensureRequired(
+          normalized,
+          brand.requiredPhrases || [],
+          c.maxChars || 280,
+          variantUrls,
         );
         return {
           label: v?.label || `Variant ${i + 1}`,
-          text: normalized,
+          text: ensured,
         };
       })
     : [];
