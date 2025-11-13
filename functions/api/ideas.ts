@@ -15,7 +15,7 @@ attachments: parseJson(row.attachments) ?? [],
 };
 
 export const onRequestGet = async ({ request, env }: { request: Request; env: any }) => {
-const auth = authorizeRequest(request, env);
+const auth = await authorizeRequest(request, env);
 if (!auth.ok) return ok({ error: auth.error }, auth.status);
 const url = new URL(request.url);
 const id = url.searchParams.get('id');
@@ -33,7 +33,7 @@ return ok((results || []).map(inflate));
 };
 
 export const onRequestPost = async ({ request, env }: { request: Request; env: any }) => {
-const auth = authorizeRequest(request, env);
+const auth = await authorizeRequest(request, env);
 if (!auth.ok) return ok({ error: auth.error }, auth.status);
 const b = await request.json().catch(() => null);
 if (!b || !b.title) return ok({ error: 'Invalid JSON' }, 400);
@@ -50,7 +50,7 @@ return ok({ id });
 };
 
 export const onRequestPut = async ({ request, env }: { request: Request; env: any }) => {
-const auth = authorizeRequest(request, env);
+const auth = await authorizeRequest(request, env);
 if (!auth.ok) return ok({ error: auth.error }, auth.status);
 const url = new URL(request.url);
 const id = url.searchParams.get('id');
@@ -81,7 +81,7 @@ return ok({ ok: true });
 };
 
 export const onRequestDelete = async ({ request, env }: { request: Request; env: any }) => {
-const auth = authorizeRequest(request, env);
+const auth = await authorizeRequest(request, env);
 if (!auth.ok) return ok({ error: auth.error }, auth.status);
 const url = new URL(request.url);
 const id = url.searchParams.get('id');

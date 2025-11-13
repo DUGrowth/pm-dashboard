@@ -169,6 +169,57 @@ async function getCurrentUser() {
   return toJson(r);
 }
 
+async function login(credentials) {
+  const r = await fetch('/api/auth', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(credentials),
+  });
+  return toJson(r);
+}
+
+async function acceptInvite(payload) {
+  const r = await fetch('/api/auth', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return toJson(r);
+}
+
+async function logout() {
+  const r = await fetch('/api/auth', { method: 'DELETE' });
+  return toJson(r);
+}
+
+async function listUsersRemote() {
+  const r = await fetch('/api/users', { method: 'GET' });
+  return toJson(r);
+}
+
+async function createUserRemote(payload) {
+  const r = await fetch('/api/users', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return toJson(r);
+}
+
+async function updateUserRemote(id, patch) {
+  const r = await fetch(`/api/users?id=${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  return toJson(r);
+}
+
+async function deleteUserRemote(id) {
+  const r = await fetch(`/api/users?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+  return toJson(r);
+}
+
 (async () => {
   const enabled = await pingServer();
   try {
@@ -196,6 +247,13 @@ async function getCurrentUser() {
         getGuidelines,
         saveGuidelines: saveGuidelinesRemote,
         getCurrentUser,
+        login,
+        logout,
+        acceptInvite,
+        listUsers: listUsersRemote,
+        createUser: createUserRemote,
+        updateUser: updateUserRemote,
+        deleteUser: deleteUserRemote,
       });
       try {
         window.dispatchEvent(new CustomEvent('pm-api-ready', { detail: { enabled } }));

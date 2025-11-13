@@ -261,7 +261,7 @@ function postValidate(result: any, input: any) {
 const withFallbackMeta = (payload: any) => ({ ...payload, fallback: true });
 
 export const onRequestPost = async ({ request, env }: { request: Request; env: any }) => {
-  const auth = authorizeRequest(request, env);
+  const auth = await authorizeRequest(request, env);
   if (!auth.ok) return ok({ error: auth.error }, auth.status);
   if (!rateLimit(getIP(request))) return ok({ error: 'Rate limit exceeded' }, 429);
   const b = await request.json().catch(() => null);

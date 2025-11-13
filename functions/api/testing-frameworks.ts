@@ -7,14 +7,14 @@ const uuid = () => crypto?.randomUUID?.() ?? (Math.random().toString(36).slice(2
 const nowIso = () => new Date().toISOString();
 
 export const onRequestGet = async ({ request, env }: { request: Request; env: any }) => {
-  const auth = authorizeRequest(request, env);
+  const auth = await authorizeRequest(request, env);
   if (!auth.ok) return ok({ error: auth.error }, auth.status);
   const { results } = await env.DB.prepare('SELECT * FROM testing_frameworks ORDER BY createdAt DESC').all();
   return ok(results || []);
 };
 
 export const onRequestPost = async ({ request, env }: { request: Request; env: any }) => {
-  const auth = authorizeRequest(request, env);
+  const auth = await authorizeRequest(request, env);
   if (!auth.ok) return ok({ error: auth.error }, auth.status);
   const b = await request.json().catch(() => null);
   if (!b || typeof b.name !== 'string' || !b.name.trim()) return ok({ error: 'Invalid JSON' }, 400);
@@ -29,7 +29,7 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: a
 };
 
 export const onRequestPut = async ({ request, env }: { request: Request; env: any }) => {
-  const auth = authorizeRequest(request, env);
+  const auth = await authorizeRequest(request, env);
   if (!auth.ok) return ok({ error: auth.error }, auth.status);
   const url = new URL(request.url);
   const id = url.searchParams.get('id');
@@ -54,7 +54,7 @@ export const onRequestPut = async ({ request, env }: { request: Request; env: an
 };
 
 export const onRequestDelete = async ({ request, env }: { request: Request; env: any }) => {
-  const auth = authorizeRequest(request, env);
+  const auth = await authorizeRequest(request, env);
   if (!auth.ok) return ok({ error: auth.error }, auth.status);
   const url = new URL(request.url);
   const id = url.searchParams.get('id');

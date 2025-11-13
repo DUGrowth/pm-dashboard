@@ -220,10 +220,17 @@
         const rawName = typeof base.name === "string" && base.name.trim() ? base.name.trim() : "";
         const rawEmail = typeof base.email === "string" && base.email.trim() ? base.email.trim() : "";
         const name = rawName || rawEmail || "Unknown user";
+        const id =
+          typeof base.id === "string" && base.id.trim()
+            ? base.id.trim()
+            : `${name || rawEmail}-${Math.random().toString(36).slice(2, 10)}`;
         return {
+          id,
           name,
           email: rawEmail,
           features: ensureFeaturesList(base.features),
+          status: base.status || "active",
+          invitePending: Boolean(base.invitePending),
         };
       };
       const DEFAULT_USER_RECORDS = DEFAULT_USERS.map(normalizeUserValue);
@@ -347,59 +354,6 @@
       const TESTING_STORAGE_KEY = "pm-content-dashboard-testing";
       const storageAvailable = typeof window !== "undefined" && typeof window.localStorage !== "undefined";
       const APPROVER_STORAGE_KEY = "pm-dashboard-approvers-v1";
-      const USER_LIST_STORAGE_KEY = "pm-dashboard-users-v1";
-      const USER_CREDENTIALS_STORAGE_KEY = "pm-dashboard-user-credentials-v1";
-      const INITIAL_CREDENTIALS = DEFAULT_USERS.reduce((acc, user) => {
-        const key = normalizeEmail(user.email || user.name);
-        if (!key) return acc;
-        acc[key] = { name: user.name, email: user.email || "", needsSetup: true };
-        return acc;
-      }, {});
-      INITIAL_CREDENTIALS["daniel.davis@populationmatters.org"] = {
-        name: "Daniel Davis",
-        email: "daniel.davis@populationmatters.org",
-        needsSetup: false,
-        passwordHash: "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
-      };
-      const hashString = async (value) => {
-        if (!value) return "";
-        const hasSubtle = typeof crypto?.subtle?.digest === "function";
-        if (hasSubtle) {
-          try {
-            const data = new TextEncoder().encode(value);
-            const digest = await crypto.subtle.digest("SHA-256", data);
-            return Array.from(new Uint8Array(digest))
-              .map((byte) => byte.toString(16).padStart(2, "0"))
-              .join("");
-          } catch {
-            // fall through to fallback below
-          }
-        }
-        return `raw:${value}`;
-      };
-      const loadUserCredentials = () => {
-        if (!storageAvailable) return { ...INITIAL_CREDENTIALS };
-        try {
-          const raw = window.localStorage.getItem(USER_CREDENTIALS_STORAGE_KEY);
-          if (!raw) return { ...INITIAL_CREDENTIALS };
-          const parsed = JSON.parse(raw);
-          if (!parsed || typeof parsed !== "object") return { ...INITIAL_CREDENTIALS };
-          return { ...INITIAL_CREDENTIALS, ...parsed };
-        } catch {
-          return { ...INITIAL_CREDENTIALS };
-        }
-      };
-      const saveUserCredentials = (payload) => {
-        if (!storageAvailable) return;
-        try {
-          window.localStorage.setItem(USER_CREDENTIALS_STORAGE_KEY, JSON.stringify(payload));
-        } catch {}
-      };
-      const verifyPassword = async (password, storedHash) => {
-        if (!storedHash) return false;
-        const hashed = await hashString(password);
-        return hashed === storedHash;
-      };
       const loadApprovers = () => {
         if (!storageAvailable) return DEFAULT_APPROVERS;
         try {
@@ -414,28 +368,6 @@
         if (!storageAvailable) return;
         try {
           window.localStorage.setItem(APPROVER_STORAGE_KEY, JSON.stringify(next));
-        } catch {}
-      };
-      const loadUsers = () => {
-        if (!storageAvailable) return DEFAULT_USER_RECORDS;
-        try {
-          const raw = window.localStorage.getItem(USER_LIST_STORAGE_KEY);
-          if (!raw) return DEFAULT_USER_RECORDS;
-          const parsed = JSON.parse(raw);
-          if (!Array.isArray(parsed) || !parsed.length) {
-            return DEFAULT_USER_RECORDS;
-          }
-          return parsed
-            .map((item) => normalizeUserValue(item))
-            .filter((user) => user.name || user.email);
-        } catch {
-          return DEFAULT_USER_RECORDS;
-        }
-      };
-      const saveUsers = (next) => {
-        if (!storageAvailable) return;
-        try {
-          window.localStorage.setItem(USER_LIST_STORAGE_KEY, JSON.stringify(next));
         } catch {}
       };
 
@@ -6055,19 +5987,25 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [testingFrameworks, setTestingFrameworks] = useState(() => loadTestingFrameworks());
         const [adminAudits, setAdminAudits] = useState([]);
         const [selectedFrameworkId, setSelectedFrameworkId] = useState("");
-        const [currentUser, setCurrentUser] = useState(() =>
-          storageAvailable ? window.localStorage.getItem(USER_STORAGE_KEY) || "" : ""
-        );
+        const [currentUser, setCurrentUser] = useState("");
         const [authStatus, setAuthStatus] = useState("loading");
         const [authError, setAuthError] = useState("");
         const [currentView, setCurrentView] = useState("menu");
         const [loginEmail, setLoginEmail] = useState("");
         const [loginPassword, setLoginPassword] = useState("");
-        const [loginPasswordConfirm, setLoginPasswordConfirm] = useState("");
         const [loginError, setLoginError] = useState("");
-        const [userCredentials, setUserCredentials] = useState(() => loadUserCredentials());
-        const [useLocalLogin, setUseLocalLogin] = useState(false);
-        const [isLocalSession, setIsLocalSession] = useState(false);
+        const [inviteToken, setInviteToken] = useState(() => {
+          if (typeof window === "undefined") return "";
+          try {
+            const url = new URL(window.location.href);
+            return url.searchParams.get("invite") || "";
+          } catch {
+            return "";
+          }
+        });
+        const [invitePassword, setInvitePassword] = useState("");
+        const [invitePasswordConfirm, setInvitePasswordConfirm] = useState("");
+        const [inviteError, setInviteError] = useState("");
         const [planTab, setPlanTab] = useState("plan");
         const [filterType, setFilterType] = useState("All");
         const [filterStatus, setFilterStatus] = useState("All");
@@ -6085,12 +6023,14 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [guidelinesOpen, setGuidelinesOpen] = useState(false);
         const [approverList, setApproverList] = useState(() => loadApprovers());
         const [newApproverName, setNewApproverName] = useState("");
-        const [userList, setUserList] = useState(() => loadUsers());
+        const [userList, setUserList] = useState(() => []);
         const [newUserFirst, setNewUserFirst] = useState("");
         const [newUserLast, setNewUserLast] = useState("");
         const [newUserEmail, setNewUserEmail] = useState("");
         const [newUserFeatures, setNewUserFeatures] = useState(() => [...DEFAULT_FEATURES]);
         const [accessModalUser, setAccessModalUser] = useState(null);
+        const [userAdminError, setUserAdminError] = useState("");
+        const [userAdminSuccess, setUserAdminSuccess] = useState("");
         const [deepLinkEntryId, setDeepLinkEntryId] = useState(() => {
           if (typeof window === 'undefined') return '';
           try {
@@ -6117,56 +6057,28 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 ? String(payload.name).trim()
                 : String(payload?.email || "");
             setCurrentUser(nextName);
-            setUseLocalLogin(false);
-            setIsLocalSession(false);
             setAuthStatus("ready");
           } catch (error) {
             console.warn("Failed to fetch authenticated user", error);
             setCurrentUser("");
-            setAuthStatus("error");
-            setAuthError(
-              "Unable to verify your access via Cloudflare Access. Please refresh or sign in again."
-            );
-            setIsLocalSession(false);
-            setUseLocalLogin(true);
+            setAuthError("Unable to verify your session. Please sign in below.");
+            setAuthStatus(inviteToken ? "invite" : "login");
           }
-        }, []);
+        }, [inviteToken]);
 
         useEffect(() => {
           hydrateCurrentUser();
         }, [hydrateCurrentUser]);
 
         useEffect(() => {
+          if (inviteToken && authStatus !== "ready") {
+            setAuthStatus("invite");
+          }
+        }, [inviteToken, authStatus]);
+
+        useEffect(() => {
           saveApprovers(approverList);
         }, [approverList]);
-        useEffect(() => {
-          saveUsers(userList);
-        }, [userList]);
-        useEffect(() => {
-          saveUserCredentials(userCredentials);
-        }, [userCredentials]);
-        useEffect(() => {
-          setUserCredentials((prev) => {
-            let mutated = false;
-            const next = { ...prev };
-            userList.forEach((user) => {
-              const key = normalizeEmail(user.email || user.name);
-              if (!key) return;
-              const existing = next[key];
-              if (!existing) {
-                next[key] = { name: user.name, email: user.email || "", needsSetup: true };
-                mutated = true;
-              } else if (
-                existing.name !== user.name ||
-                existing.email !== (user.email || "")
-              ) {
-                next[key] = { ...existing, name: user.name, email: user.email || "" };
-                mutated = true;
-              }
-            });
-            return mutated ? next : prev;
-          });
-        }, [userList]);
         const notifyViaServer = (payload) => {
           if (typeof window === "undefined" || !payload) return;
           if (window.api && window.api.enabled && window.api.notify) {
@@ -6188,12 +6100,6 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           }
         };
 
-        const sendNewUserEmail = (user) => {
-          if (!user || !user.email) return;
-          const subject = "PM Dashboard access granted";
-          const text = `Hi ${user.name},\n\nYou've been invited to the Population Matters PM Dashboard. Visit ${window.location.origin} and sign in with your Population Matters account via Cloudflare Access. Once Zero Trust lets you through, you'll land directly in the dashboard—no extra password needed.\n\nIf you weren't expecting this, please reach out to the comms team.`;
-          notifyViaServer({ to: [user.email], subject, text });
-        };
         const addApprover = () => {
           const next = newApproverName.trim();
           if (!next) return;
@@ -6206,7 +6112,9 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const removeApprover = (name) => {
           setApproverList((prev) => prev.filter((item) => item !== name));
         };
-        const addUser = () => {
+        const addUser = async () => {
+          setUserAdminError("");
+          setUserAdminSuccess("");
           const first = newUserFirst.trim();
           const last = newUserLast.trim();
           const email = newUserEmail.trim();
@@ -6214,40 +6122,47 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           const fullname = `${first} ${last}`;
           const normalizedEmail = normalizeEmail(email);
           const selectedFeatures = ensureFeaturesList(newUserFeatures);
-          setUserList((prev) => {
-            if (
-              prev.some(
-                (user) =>
-                  user.name === fullname ||
-                  normalizeEmail(user.email || user.name) === normalizedEmail
-              )
-            )
-              return prev;
-            const next = [...prev, { name: fullname, email, features: selectedFeatures }];
-            sendNewUserEmail({ name: fullname, email });
-            return next;
-          });
-          if (normalizedEmail) {
-            setUserCredentials((prev) => {
-              const next = { ...prev };
-              next[normalizedEmail] = { name: fullname, email, needsSetup: true };
-              return next;
-            });
+          if (!window.api || typeof window.api.createUser !== "function") {
+            setUserAdminError("Server is offline. Try again when connected.");
+            return;
+          }
+          try {
+            const created = await window.api
+              .createUser({ name: fullname, email, features: selectedFeatures })
+              .catch((error) => {
+                throw error;
+              });
+            if (created) {
+              setUserList((prev) => {
+                const without = prev.filter((user) => user.id !== created.id);
+                return [created, ...without];
+              });
+              setUserAdminSuccess(`Invitation sent to ${email}.`);
+            }
+          } catch (error) {
+            console.error(error);
+            setUserAdminError("Unable to create user. Please try again.");
           }
           setNewUserFirst("");
           setNewUserLast("");
           setNewUserEmail("");
           setNewUserFeatures([...DEFAULT_FEATURES]);
         };
-        const removeUser = (user) => {
-          setUserList((prev) => prev.filter((item) => item.name !== user.name));
-          const key = normalizeEmail(user.email || user.name);
-          if (key) {
-            setUserCredentials((prev) => {
-              const next = { ...prev };
-              delete next[key];
-              return next;
-            });
+        const removeUser = async (user) => {
+          if (!user?.id) return;
+          setUserAdminError("");
+          setUserAdminSuccess("");
+          if (!window.api || typeof window.api.deleteUser !== "function") {
+            setUserAdminError("Server is offline.");
+            return;
+          }
+          try {
+            await window.api.deleteUser(user.id);
+            setUserList((prev) => prev.filter((item) => item.id !== user.id));
+            setUserAdminSuccess(`Removed ${user.name || user.email}.`);
+          } catch (error) {
+            console.error(error);
+            setUserAdminError("Unable to remove user.");
           }
         };
         const toggleNewUserFeature = (feature) => {
@@ -6255,15 +6170,26 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             prev.includes(feature) ? prev.filter((item) => item !== feature) : [...prev, feature]
           );
         };
-        const handleAccessSave = (features) => {
+        const handleAccessSave = async (features) => {
           if (!accessModalUser) return;
           const normalized = ensureFeaturesList(features);
-          setUserList((prev) =>
-            prev.map((user) =>
-              user.name === accessModalUser.name ? { ...user, features: normalized } : user
-            )
-          );
-          setAccessModalUser(null);
+          if (!window.api || typeof window.api.updateUser !== "function") {
+            setUserAdminError("Server is offline.");
+            return;
+          }
+          try {
+            const result = await window.api.updateUser(accessModalUser.id, { features: normalized });
+            if (result?.user) {
+              setUserList((prev) =>
+                prev.map((user) => (user.id === result.user.id ? result.user : user))
+              );
+            }
+          } catch (error) {
+            console.error(error);
+            setUserAdminError("Unable to update access.");
+          } finally {
+            setAccessModalUser(null);
+          }
         };
 
         useEffect(() => {
@@ -6273,18 +6199,23 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           setTestingFrameworks(loadTestingFrameworks());
         }, []);
 
-        // If server is available, hydrate from API once on load (override local); fall back to local on failure
+        // If server is available, hydrate from API once authenticated; fall back to local on failure
         useEffect(() => {
+          if (authStatus !== "ready") return;
+          let cancelled = false;
           (async () => {
             try {
               if (window.api && window.api.enabled) {
-                const [serverEntries, serverIdeas, serverLinkedIn, serverFrameworks, serverGuidelines] = await Promise.all([
-                  window.api.listEntries().catch(() => []),
-                  window.api.listIdeas().catch(() => []),
-                  window.api.listLinkedIn().catch(() => []),
-                  window.api.listTestingFrameworks().catch(() => []),
-                  window.api.getGuidelines ? window.api.getGuidelines().catch(() => null) : Promise.resolve(null),
-                ]);
+                const [serverEntries, serverIdeas, serverLinkedIn, serverFrameworks, serverGuidelines, serverUsers] =
+                  await Promise.all([
+                    window.api.listEntries().catch(() => []),
+                    window.api.listIdeas().catch(() => []),
+                    window.api.listLinkedIn().catch(() => []),
+                    window.api.listTestingFrameworks().catch(() => []),
+                    window.api.getGuidelines ? window.api.getGuidelines().catch(() => null) : Promise.resolve(null),
+                    window.api.listUsers ? window.api.listUsers().catch(() => []) : Promise.resolve([]),
+                  ]);
+                if (cancelled) return;
                 if (Array.isArray(serverEntries)) setEntries(serverEntries);
                 if (Array.isArray(serverIdeas)) setIdeas(serverIdeas);
                 if (Array.isArray(serverLinkedIn)) setLinkedinSubmissions(serverLinkedIn);
@@ -6294,37 +6225,45 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                   setGuidelines(normalized);
                   saveGuidelines(normalized);
                 }
+                if (Array.isArray(serverUsers)) setUserList(serverUsers);
               }
             } catch {}
           })();
-        }, []);
+          return () => {
+            cancelled = true;
+          };
+        }, [authStatus]);
 
         // Also hydrate when the api client announces readiness
         useEffect(() => {
           const onReady = (e) => {
-            if (e?.detail?.enabled) {
+            if (e?.detail?.enabled && authStatus === "ready") {
               Promise.all([
                 window.api.listEntries().catch(() => []),
                 window.api.listIdeas().catch(() => []),
                 window.api.listLinkedIn().catch(() => []),
                 window.api.listTestingFrameworks().catch(() => []),
                 window.api.getGuidelines ? window.api.getGuidelines().catch(() => null) : Promise.resolve(null),
-              ]).then(([serverEntries, serverIdeas, serverLinkedIn, serverFrameworks, serverGuidelines]) => {
-                if (Array.isArray(serverEntries)) setEntries(serverEntries);
-                if (Array.isArray(serverIdeas)) setIdeas(serverIdeas);
-                if (Array.isArray(serverLinkedIn)) setLinkedinSubmissions(serverLinkedIn);
-                if (Array.isArray(serverFrameworks)) setTestingFrameworks(serverFrameworks);
-                if (serverGuidelines) {
-                  const normalized = normalizeGuidelines(serverGuidelines);
-                  setGuidelines(normalized);
-                  saveGuidelines(normalized);
-                }
-              }).catch(() => {});
+                window.api.listUsers ? window.api.listUsers().catch(() => []) : Promise.resolve([]),
+              ])
+                .then(([serverEntries, serverIdeas, serverLinkedIn, serverFrameworks, serverGuidelines, serverUsers]) => {
+                  if (Array.isArray(serverEntries)) setEntries(serverEntries);
+                  if (Array.isArray(serverIdeas)) setIdeas(serverIdeas);
+                  if (Array.isArray(serverLinkedIn)) setLinkedinSubmissions(serverLinkedIn);
+                  if (Array.isArray(serverFrameworks)) setTestingFrameworks(serverFrameworks);
+                  if (serverGuidelines) {
+                    const normalized = normalizeGuidelines(serverGuidelines);
+                    setGuidelines(normalized);
+                    saveGuidelines(normalized);
+                  }
+                  if (Array.isArray(serverUsers)) setUserList(serverUsers);
+                })
+                .catch(() => {});
             }
           };
-          window.addEventListener('pm-api-ready', onReady);
-          return () => window.removeEventListener('pm-api-ready', onReady);
-        }, []);
+          window.addEventListener("pm-api-ready", onReady);
+          return () => window.removeEventListener("pm-api-ready", onReady);
+        }, [authStatus]);
 
         useEffect(() => {
           setMenuMotionActive(true);
@@ -7256,42 +7195,28 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const resetLoginFields = () => {
           setLoginEmail("");
           setLoginPassword("");
-          setLoginPasswordConfirm("");
           setLoginError("");
         };
 
         const retryAuth = () => {
-          setUseLocalLogin(false);
           hydrateCurrentUser();
         };
 
         const handleSignOut = () => {
-          if (useLocalLogin || authStatus === "local") {
+          (async () => {
+            try {
+              if (window.api && typeof window.api.logout === "function") {
+                await window.api.logout();
+              } else {
+                await fetch("/api/auth", { method: "DELETE" });
+              }
+            } catch {}
             setCurrentUser("");
-            setAuthStatus("local");
-            setUseLocalLogin(true);
-            setIsLocalSession(false);
+            setAuthStatus("login");
             resetLoginFields();
             setCurrentView("menu");
             closeEntry();
-            return;
-          }
-          if (isLocalSession) {
-            setCurrentUser("");
-            setIsLocalSession(false);
-            setUseLocalLogin(true);
-            setAuthStatus("local");
-            resetLoginFields();
-            setCurrentView("menu");
-            closeEntry();
-            return;
-          }
-          try {
-            const target = '/cdn-cgi/access/logout';
-            window.location.href = target;
-          } catch {
-            window.location.reload();
-          }
+          })();
         };
 
         const submitLogin = async (event) => {
@@ -7302,76 +7227,164 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             setLoginError("Enter the email you were invited with.");
             return;
           }
-          const credential = userCredentials[normalizedEmail];
-          if (!credential) {
-            setLoginError("We don't have an invitation for that email.");
-            return;
-          }
-          const needsSetup = credential.needsSetup || !credential.passwordHash;
           if (!loginPassword) {
-            setLoginError("Enter a password.");
+            setLoginError("Enter your password.");
             return;
           }
-          if (needsSetup) {
-            if (!loginPasswordConfirm) {
-              setLoginError("Confirm your password.");
-              return;
+          try {
+            let response = null;
+            if (window.api && typeof window.api.login === "function") {
+              response = await window.api.login({ email: normalizedEmail, password: loginPassword });
+            } else {
+              const res = await fetch("/api/auth", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ email: normalizedEmail, password: loginPassword }),
+              });
+              if (!res.ok) throw new Error(`HTTP_${res.status}`);
+              response = await res.json();
             }
-            if (loginPassword !== loginPasswordConfirm) {
-              setLoginError("Passwords must match.");
-              return;
-            }
-            const hashed = await hashString(loginPassword);
-            setUserCredentials((prev) => {
-              const next = { ...prev };
-              next[normalizedEmail] = { ...credential, passwordHash: hashed, needsSetup: false };
-              return next;
-            });
-          } else {
-            const valid = await verifyPassword(loginPassword, credential.passwordHash);
-            if (!valid) {
-              setLoginError("Invalid password.");
-              return;
-            }
+            const name =
+              response?.user?.name && response.user.name.trim().length
+                ? response.user.name.trim()
+                : normalizedEmail;
+            setCurrentUser(name);
+            setAuthStatus("ready");
+            setAuthError("");
+            resetLoginFields();
+          } catch (error) {
+            console.error(error);
+            setLoginError("Invalid email or password.");
           }
-          setCurrentUser(credential.name);
-          setAuthStatus("ready");
-          setUseLocalLogin(false);
-          setIsLocalSession(true);
-          resetLoginFields();
-          setCurrentView("menu");
-          closeEntry();
         };
 
-        if (useLocalLogin || authStatus === "local") {
-          const normalizedLoginEmail = normalizeEmail(loginEmail);
-          const pendingCredential = normalizedLoginEmail
-            ? userCredentials[normalizedLoginEmail]
-            : null;
-          const needsSetup = Boolean(
-            pendingCredential && (pendingCredential.needsSetup || !pendingCredential.passwordHash)
+        const clearInviteParam = () => {
+          if (typeof window === "undefined") return;
+          try {
+            const url = new URL(window.location.href);
+            if (url.searchParams.has("invite")) {
+              url.searchParams.delete("invite");
+              window.history.replaceState(
+                {},
+                document.title,
+                `${url.pathname}${url.search}${url.hash}`
+              );
+            }
+          } catch {}
+        };
+
+        const submitInvite = async (event) => {
+          event.preventDefault();
+          setInviteError("");
+          if (!inviteToken) {
+            setInviteError("This invite link is invalid.");
+            return;
+          }
+          if (!invitePassword || invitePassword.length < 8) {
+            setInviteError("Choose a password with at least 8 characters.");
+            return;
+          }
+          if (invitePassword !== invitePasswordConfirm) {
+            setInviteError("Passwords must match.");
+            return;
+          }
+          try {
+            let response = null;
+            if (window.api && typeof window.api.acceptInvite === "function") {
+              response = await window.api.acceptInvite({ token: inviteToken, password: invitePassword });
+            } else {
+              const res = await fetch("/api/auth", {
+                method: "PUT",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ token: inviteToken, password: invitePassword }),
+              });
+              if (!res.ok) throw new Error(`HTTP_${res.status}`);
+              response = await res.json();
+            }
+            const name =
+              response?.user?.name && response.user.name.trim().length
+                ? response.user.name.trim()
+                : response?.user?.email || "";
+            setCurrentUser(name);
+            setInviteToken("");
+            setInvitePassword("");
+            setInvitePasswordConfirm("");
+            setAuthStatus("ready");
+            clearInviteParam();
+          } catch (error) {
+            console.error(error);
+            setInviteError("This invite link is invalid or has expired.");
+          }
+        };
+
+        if (authStatus === "invite") {
+          return (
+            <div className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-4 py-16 text-ocean-900">
+              <div className="rounded-3xl border border-aqua-200 bg-white p-8 shadow-2xl">
+                <h1 className="heading-font text-3xl font-semibold text-ocean-600">Welcome to PM Dashboard</h1>
+                <p className="mt-2 text-sm text-graystone-600">
+                  Set your password to finish activating your account.
+                </p>
+                {inviteError ? (
+                  <div className="mt-3 rounded-2xl bg-rose-50 px-4 py-2 text-xs text-rose-700">{inviteError}</div>
+                ) : null}
+                <form className="mt-6 space-y-4" onSubmit={submitInvite}>
+                  <div className="space-y-2">
+                    <Label className="text-sm text-graystone-600" htmlFor="invite-password">
+                      Password
+                    </Label>
+                    <Input
+                      id="invite-password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={invitePassword}
+                      onChange={(event) => setInvitePassword(event.target.value)}
+                      className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm text-graystone-600" htmlFor="invite-password-confirm">
+                      Confirm password
+                    </Label>
+                    <Input
+                      id="invite-password-confirm"
+                      type="password"
+                      autoComplete="new-password"
+                      value={invitePasswordConfirm}
+                      onChange={(event) => setInvitePasswordConfirm(event.target.value)}
+                      className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
+                    />
+                  </div>
+                  <Button type="submit" className="w-full">
+                    Set password & enter
+                  </Button>
+                </form>
+                <button
+                  type="button"
+                  className="mt-4 text-xs text-ocean-600 underline"
+                  onClick={() => {
+                    setInviteToken("");
+                    setAuthStatus("login");
+                    clearInviteParam();
+                  }}
+                >
+                  Have an account already? Sign in instead
+                </button>
+              </div>
+            </div>
           );
-          const helperText = pendingCredential
-            ? needsSetup
-              ? `Hi ${pendingCredential.name}. Set a password to accept the invite and enter the dashboard.`
-              : `Hi ${pendingCredential.name}, enter your password to continue.`
-            : "Enter the email you were invited with to set up access.";
-          const canSubmit =
-            Boolean(loginEmail) &&
-            Boolean(loginPassword) &&
-            (!needsSetup || Boolean(loginPasswordConfirm));
-          const submitLabel = needsSetup ? "Create password & enter" : "Enter dashboard";
+        }
+
+        if (authStatus === "login") {
           return (
             <div className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-4 py-16 text-ocean-900">
               <div className="rounded-3xl border border-aqua-200 bg-white p-8 shadow-2xl">
                 <h1 className="heading-font text-3xl font-semibold text-ocean-600">Content Dashboard</h1>
                 <p className="mt-2 text-sm text-graystone-600">
-                  Cloudflare Access isn't available right now, so use your dashboard password instead. First-time visits ask you to create one before continuing.
+                  Sign in with the email address you were invited with. You'll stay signed in on this device.
                 </p>
                 {authError ? (
-                  <div className="mt-2 rounded-2xl bg-rose-50 px-4 py-2 text-xs text-rose-700">
-                    {authError}
-                  </div>
+                  <div className="mt-3 rounded-2xl bg-amber-50 px-4 py-2 text-xs text-amber-800">{authError}</div>
                 ) : null}
                 <form className="mt-6 space-y-4" onSubmit={submitLogin}>
                   <div className="space-y-2">
@@ -7400,39 +7413,26 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                       className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
                     />
                   </div>
-                  {needsSetup && (
-                    <div className="space-y-2">
-                      <Label className="text-sm text-graystone-600" htmlFor="login-password-confirm">
-                        Confirm password
-                      </Label>
-                      <Input
-                        id="login-password-confirm"
-                        type="password"
-                        autoComplete="new-password"
-                        value={loginPasswordConfirm}
-                        onChange={(event) => setLoginPasswordConfirm(event.target.value)}
-                        className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
-                      />
-                    </div>
-                  )}
-                  <div className="text-xs text-graystone-500">{helperText}</div>
                   {loginError ? (
                     <div className="text-xs text-rose-700">{loginError}</div>
-                  ) : null}
-                  <Button type="submit" className="w-full" disabled={!canSubmit}>
-                    {submitLabel}
+                  ) : (
+                    <div className="text-xs text-graystone-500">
+                      Forgot your password? Ask an admin to resend your invitation.
+                    </div>
+                  )}
+                  <Button type="submit" className="w-full">
+                    Enter dashboard
                   </Button>
                 </form>
                 <button
                   type="button"
                   className="mt-4 text-xs text-ocean-600 underline"
                   onClick={() => {
-                    setUseLocalLogin(false);
-                    setAuthStatus("loading");
+                    setInviteToken("");
                     retryAuth();
                   }}
                 >
-                  Use Cloudflare Access instead
+                  Having trouble? Retry session check
                 </button>
               </div>
               <p className="mt-6 text-center text-xs text-graystone-500">
@@ -7452,49 +7452,6 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 </p>
                 <div className="mt-6 animate-pulse rounded-2xl bg-aqua-100 px-4 py-3 text-sm text-ocean-700">
                   Hang tight—this only takes a moment.
-                </div>
-              </div>
-            </div>
-          );
-        }
-
-        if (authStatus === "error" || !currentUser) {
-          const loginUrl = `/cdn-cgi/access/login?redirect_url=${encodeURIComponent(window.location.href)}`;
-          return (
-            <div className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-4 py-16 text-ocean-900">
-              <div className="rounded-3xl border border-rose-200 bg-white p-8 shadow-2xl">
-                <h1 className="heading-font text-3xl font-semibold text-rose-600">Access required</h1>
-                <p className="mt-4 text-sm text-graystone-600">
-                  {authError ||
-                    "We couldn't confirm your Cloudflare Access session. Refresh the page or sign in again to continue."}
-                </p>
-                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                  <Button className="flex-1" onClick={retryAuth}>
-                    Retry access check
-                  </Button>
-                  <div className="flex flex-1 flex-col gap-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => {
-                        window.location.href = loginUrl;
-                      }}
-                    >
-                      Sign in again
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="w-full text-ocean-700 underline"
-                      onClick={() => {
-                        setUseLocalLogin(true);
-                        setAuthStatus("local");
-                      }}
-                    >
-                      Use dashboard password instead
-                    </Button>
-                  </div>
                 </div>
               </div>
             </div>
@@ -8652,16 +8609,32 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                     </p>
                   </CardHeader>
                   <CardContent>
+                    {userAdminError ? (
+                      <div className="mb-3 rounded-2xl bg-rose-50 px-4 py-2 text-xs text-rose-700">
+                        {userAdminError}
+                      </div>
+                    ) : null}
+                    {userAdminSuccess ? (
+                      <div className="mb-3 rounded-2xl bg-emerald-50 px-4 py-2 text-xs text-emerald-700">
+                        {userAdminSuccess}
+                      </div>
+                    ) : null}
                     <div className="space-y-2">
                       {userList.length ? (
                         userList.map((user) => (
                           <div
-                            key={user.name}
+                            key={user.id || user.email || user.name}
                             className="flex items-center justify-between rounded-xl border border-graystone-200 bg-white px-3 py-2 text-sm text-graystone-700"
                           >
                             <div>
                               <div className="font-medium text-graystone-900">{user.name}</div>
-                              <div className="text-[11px] text-graystone-500">{user.email || 'No email'}</div>
+                              <div className="text-[11px] text-graystone-500">
+                                {user.email || 'No email'} · {user.status === 'disabled'
+                                  ? 'Disabled'
+                                  : user.invitePending || user.status === 'pending'
+                                  ? 'Invite pending'
+                                  : 'Active'}
+                              </div>
                             </div>
                             <div className="flex items-center gap-2">
                               <Button variant="outline" size="sm" onClick={() => setAccessModalUser(user)}>

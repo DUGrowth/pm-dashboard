@@ -95,3 +95,33 @@ CREATE TABLE IF NOT EXISTS testing_frameworks (
   notes TEXT,
   createdAt TEXT
 );
+
+-- Users and sessions for dashboard authentication
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  passwordHash TEXT,
+  inviteToken TEXT,
+  inviteExpiresAt TEXT,
+  features TEXT,
+  status TEXT DEFAULT 'pending',
+  isAdmin INTEGER DEFAULT 0,
+  createdAt TEXT,
+  updatedAt TEXT,
+  lastLoginAt TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  tokenHash TEXT NOT NULL,
+  createdAt TEXT,
+  expiresAt TEXT,
+  userAgent TEXT,
+  ip TEXT,
+  FOREIGN KEY (userId) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_tokenHash ON sessions(tokenHash);
+CREATE INDEX IF NOT EXISTS idx_sessions_userId ON sessions(userId);

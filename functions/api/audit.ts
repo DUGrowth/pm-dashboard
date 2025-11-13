@@ -7,7 +7,7 @@ const uuid = () => (crypto?.randomUUID?.() ?? (Math.random().toString(36).slice(
 const nowIso = () => new Date().toISOString();
 
 export const onRequestGet = async ({ request, env }: { request: Request; env: any }) => {
-const auth = authorizeRequest(request, env);
+const auth = await authorizeRequest(request, env);
 if (!auth.ok) return ok({ error: auth.error }, auth.status);
 const url = new URL(request.url);
 const entryId = url.searchParams.get('entryId');
@@ -24,7 +24,7 @@ return ok(results || []);
 };
 
 export const onRequestPost = async ({ request, env }: { request: Request; env: any }) => {
-const auth = authorizeRequest(request, env);
+const auth = await authorizeRequest(request, env);
 if (!auth.ok) return ok({ error: auth.error }, auth.status);
 const b = await request.json().catch(() => null);
 if (!b || typeof b !== 'object') return ok({ error: 'Invalid JSON' }, 400);

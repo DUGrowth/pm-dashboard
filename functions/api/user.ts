@@ -7,11 +7,14 @@ const ok = (data: unknown, status = 200) =>
   });
 
 export const onRequestGet = async ({ request, env }: { request: Request; env: any }) => {
-  const auth = authorizeRequest(request, env);
+  const auth = await authorizeRequest(request, env);
   if (!auth.ok) return ok({ error: auth.error }, auth.status);
   return ok({
+    id: auth.user.id,
     email: auth.user.email,
     name: auth.user.name,
+    isAdmin: auth.user.isAdmin,
+    features: auth.user.features,
     ts: new Date().toISOString(),
   });
 };

@@ -1,6 +1,7 @@
 // Notification proxy: supports Teams webhook plus email via Brevo (primary) or MailChannels (fallback)
 
 import { authorizeRequest } from './_auth';
+import { sendEmail } from '../lib/email';
 
 const ok = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
@@ -88,77 +89,8 @@ const resolveRecipients = (body: EmailPayload, env: any) => {
   return unique;
 };
 
-const sendViaBrevo = async ({
-  to,
-  subject,
-  text,
-  html,
-  env,
-}: {
-  to: string[];
-  subject: string;
-  text?: string;
-  html?: string;
-  env: any;
-}) => {
-  const apiKey = env.BREVO_API_KEY || env.BREVO_API_TOKEN;
-  if (!apiKey) return { ok: false, reason: 'missing_api_key' };
-  const senderEmail = env.BREVO_SENDER_EMAIL || env.MAIL_FROM || 'no-reply@example.com';
-  const senderName = env.BREVO_SENDER_NAME || env.MAIL_FROM_NAME || 'PM Dashboard';
-  const endpoint = env.BREVO_API_BASE || 'https://api.brevo.com/v3/smtp/email';
-  const payload: Record<string, any> = {
-    sender: { email: senderEmail, name: senderName },
-    to: to.map((email) => ({ email })),
-    subject,
-  };
-  if (html) payload.htmlContent = String(html);
-  if (text) payload.textContent = String(text);
-  if (!payload.htmlContent && !payload.textContent) payload.textContent = 'Notification';
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'api-key': apiKey,
-    },
-    body: JSON.stringify(payload),
-  });
-  return { ok: res.ok, status: res.status };
-};
-
-const sendViaMailChannels = async ({
-  to,
-  subject,
-  text,
-  html,
-  env,
-}: {
-  to: string[];
-  subject: string;
-  text?: string;
-  html?: string;
-  env: any;
-}) => {
-  const fromEmail = env.MAIL_FROM || 'no-reply@example.com';
-  const fromName = env.MAIL_FROM_NAME || 'PM Dashboard';
-  const content: any[] = [];
-  if (text) content.push({ type: 'text/plain', value: String(text) });
-  if (html) content.push({ type: 'text/html', value: String(html) });
-  if (!content.length) content.push({ type: 'text/plain', value: 'Notification' });
-  const res = await fetch('https://api.mailchannels.net/tx/v1/send', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      personalizations: [{ to: to.map((email) => ({ email })) }],
-      from: { email: fromEmail, name: fromName },
-      subject,
-      content,
-    }),
-  });
-  return { ok: res.ok, status: res.status };
-};
-
 export const onRequestPost = async ({ request, env }: { request: Request; env: any }) => {
-  const auth = authorizeRequest(request, env);
+  const auth = await authorizeRequest(request, env);
   if (!auth.ok) return ok({ error: auth.error }, auth.status);
   const b = await request.json().catch(() => null);
   if (!b || typeof b !== 'object') return ok({ error: 'Invalid JSON' }, 400);
@@ -188,23 +120,16 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: a
   if (recipients.length && (b.subject || b.text || b.html)) {
     const subject = String(b.subject || 'Notification');
     try {
-      let emailResult:
-        | { ok: boolean; status?: number | string; reason?: string }
-        | null = null;
-      if (env.BREVO_API_KEY || env.BREVO_API_TOKEN) {
-        emailResult = await sendViaBrevo({ to: recipients, subject, text: b.text, html: b.html, env });
-        if (!emailResult.ok && env.MAIL_FROM) {
-          // attempt fallback to MailChannels
-          emailResult = await sendViaMailChannels({ to: recipients, subject, text: b.text, html: b.html, env });
-        }
-      } else if (env.MAIL_FROM || env.MAIL_FROM_NAME) {
-        emailResult = await sendViaMailChannels({ to: recipients, subject, text: b.text, html: b.html, env });
-      }
-      if (emailResult) {
-        results.email = emailResult.ok ? 'sent' : `http_${emailResult.status || emailResult.reason || 'error'}`;
-      } else {
-        results.email = 'skipped_no_sender';
-      }
+      const result = await sendEmail({
+        env,
+        to: recipients,
+        subject,
+        text: b.text,
+        html: b.html,
+      });
+      results.email = result.ok
+        ? 'sent'
+        : `http_${result.status || result.reason || 'error'}`;
     } catch {
       results.email = 'error';
     }

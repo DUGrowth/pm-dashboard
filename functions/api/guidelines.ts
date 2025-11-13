@@ -25,7 +25,7 @@ headers: { 'content-type': 'application/json' },
 });
 
 export const onRequestGet = async ({ request, env }: { request: Request; env: any }) => {
-const auth = authorizeRequest(request, env);
+const auth = await authorizeRequest(request, env);
 if (!auth.ok) return ok({ error: auth.error }, auth.status);
 if (!env.DB) return ok({ id: 'default', ...DEFAULTS });
 const row = await env.DB.prepare("SELECT * FROM guidelines WHERE id='default'").first();
@@ -45,7 +45,7 @@ teamsWebhookUrl: row.teamsWebhookUrl ?? DEFAULTS.teamsWebhookUrl,
 };
 
 export const onRequestPut = async ({ request, env }: { request: Request; env: any }) => {
-const auth = authorizeRequest(request, env);
+const auth = await authorizeRequest(request, env);
 if (!auth.ok) return ok({ error: auth.error }, auth.status);
 const b = await request.json().catch(() => null);
 if (!b) return ok({ error: 'Invalid JSON' }, 400);
