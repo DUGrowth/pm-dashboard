@@ -46,6 +46,7 @@ Authentication & user management
 - Configure `MAIL_FROM` / `MAIL_FROM_NAME` (and optionally Brevo credentials) so the worker can send the invitation emails directly. `ADMIN_EMAILS` seeds which accounts should have full admin rights after they accept their invite.
 - Cloudflare Access headers are still understood, so you can keep Zero Trust enabled while migrating. Once confident in the new flow, remove the Access policy so teammates can use the built-in password login from any device.
 - To bootstrap your first admin account, temporarily set `ALLOW_UNAUTHENTICATED=1` (or insert a row directly into `users`) and create an invite for an address listed in `ADMIN_EMAILS`. After accepting the invite, remove the dev override.
+- For convenience, the system seeds a default owner account (`daniel.davis@populationmatters.org` / password `password`) if that email doesn’t already exist. Log in with it once, change the credentials immediately via the “resend invite” flow, and then invite the rest of the team.
 
 Local Development
 1) Serve `index.html` with any static server (or Cloudflare Pages dev).

@@ -87,12 +87,68 @@ const ensureEmail = (value: string | undefined | null) => {
   return trimmed;
 };
 
+const DEFAULT_OWNER_EMAIL = 'daniel.davis@populationmatters.org';
+const DEFAULT_OWNER_NAME = 'Daniel Davis';
+const DEFAULT_OWNER_PASSWORD = 'password';
+const DEFAULT_FEATURES = JSON.stringify([
+  'calendar',
+  'kanban',
+  'approvals',
+  'ideas',
+  'linkedin',
+  'testing',
+  'admin',
+]);
+
+const ensureDefaultOwner = async (env: any) => {
+  const existing = await findUserByEmail(env, DEFAULT_OWNER_EMAIL);
+  const now = new Date().toISOString();
+  if (existing && existing.passwordHash) return existing;
+  const hashed = await hashPassword(DEFAULT_OWNER_PASSWORD);
+  if (existing) {
+    await env.DB.prepare(
+      'UPDATE users SET name=?, passwordHash=?, status=?, isAdmin=1, features=?, inviteToken=NULL, inviteExpiresAt=NULL, updatedAt=? WHERE id=?',
+    )
+      .bind(
+        DEFAULT_OWNER_NAME,
+        hashed,
+        'active',
+        DEFAULT_FEATURES,
+        now,
+        existing.id,
+      )
+      .run();
+    const row = await env.DB.prepare('SELECT * FROM users WHERE id=?').bind(existing.id).first();
+    return row;
+  }
+  const id = randomId('usr_');
+  await env.DB.prepare(
+    'INSERT INTO users (id,email,name,passwordHash,status,isAdmin,features,createdAt,updatedAt,lastLoginAt) VALUES (?,?,?,?,?,?,?,?,?,?)',
+  )
+    .bind(
+      id,
+      DEFAULT_OWNER_EMAIL,
+      DEFAULT_OWNER_NAME,
+      hashed,
+      'active',
+      1,
+      DEFAULT_FEATURES,
+      now,
+      now,
+      null,
+    )
+    .run();
+  const row = await env.DB.prepare('SELECT * FROM users WHERE id=?').bind(id).first();
+  return row;
+};
+
 export const onRequestPost = async ({ request, env }: { request: Request; env: any }) => {
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== 'object') return json({ error: 'Invalid JSON' }, 400);
   const email = ensureEmail(body.email);
   const password = typeof body.password === 'string' ? body.password : '';
   if (!email || !password) return json({ error: 'Email and password required' }, 400);
+  await ensureDefaultOwner(env);
   const user = await findUserByEmail(env, email);
   if (!user || !user.passwordHash) return json({ error: 'Invalid credentials' }, 401);
   if (user.status === 'disabled') return json({ error: 'Account disabled' }, 403);
