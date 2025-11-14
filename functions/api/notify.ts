@@ -127,9 +127,15 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: a
         text: b.text,
         html: b.html,
       });
-      results.email = result.ok
-        ? 'sent'
-        : `http_${result.status || result.reason || 'error'}`;
+      if (result.ok) {
+        results.email = 'sent';
+      } else if ('status' in result && typeof result.status === 'number') {
+        results.email = `http_${result.status}`;
+      } else if ('reason' in result && result.reason) {
+        results.email = String(result.reason);
+      } else {
+        results.email = 'error';
+      }
     } catch {
       results.email = 'error';
     }

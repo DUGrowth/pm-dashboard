@@ -40,6 +40,7 @@ const sanitizeUser = (row: any) => ({
   name: row.name,
   status: row.status,
   isAdmin: Boolean(row.isAdmin),
+  hasPassword: Boolean(row.passwordHash),
   features: (() => {
     try {
       const parsed = JSON.parse(row.features || '[]');

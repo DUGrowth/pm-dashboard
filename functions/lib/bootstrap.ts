@@ -1,8 +1,7 @@
-import { hashPassword, randomId, verifyPassword } from './crypto';
+import { generateToken, randomId } from './crypto';
 
 const DEFAULT_OWNER_EMAIL = 'daniel.davis@populationmatters.org';
 const DEFAULT_OWNER_NAME = 'Daniel Davis';
-const DEFAULT_OWNER_PASSWORD = 'password';
 const DEFAULT_OWNER_FEATURES = [
   'calendar',
   'kanban',
@@ -12,9 +11,6 @@ const DEFAULT_OWNER_FEATURES = [
   'testing',
   'admin',
 ];
-
-const UPSERT_COLUMNS =
-  'name=?, passwordHash=?, status=?, isAdmin=1, features=?, inviteToken=NULL, inviteExpiresAt=NULL, updatedAt=?, lastLoginAt=NULL';
 
 const USER_ALTERS = [
   'ALTER TABLE users ADD COLUMN inviteToken TEXT',
@@ -62,47 +58,64 @@ async function ensureSchema(env: any) {
   }
 }
 
+const logInviteToken = (token: string) => {
+  if (!token) return;
+  console.warn(
+    `Default owner invite token ready for ${DEFAULT_OWNER_EMAIL}. Share ?invite=${token} with Daniel to finish setup.`,
+  );
+};
+
 export async function ensureDefaultOwner(env: any) {
   try {
     if (!env?.DB) return;
     await ensureSchema(env);
     const normalizedEmail = DEFAULT_OWNER_EMAIL.toLowerCase();
     const existing = await env.DB.prepare('SELECT * FROM users WHERE email=?').bind(normalizedEmail).first();
-    if (existing && existing.passwordHash && existing.lastLoginAt) return;
     const now = new Date().toISOString();
     const featuresJson = JSON.stringify(DEFAULT_OWNER_FEATURES);
-    const hashed = await hashPassword(DEFAULT_OWNER_PASSWORD);
-    if (existing) {
-      const needsReset =
-        !existing.passwordHash ||
-        !existing.lastLoginAt ||
-        !(await verifyPassword(DEFAULT_OWNER_PASSWORD, existing.passwordHash));
-      if (!needsReset) return;
-      try {
-        await env.DB.prepare(`UPDATE users SET ${UPSERT_COLUMNS} WHERE id=?`)
-          .bind(DEFAULT_OWNER_NAME, hashed, 'active', featuresJson, now, existing.id)
-          .run();
-      } catch {
-        await env.DB.prepare('UPDATE users SET name=?, passwordHash=?, status=?, isAdmin=1, features=?, updatedAt=? WHERE id=?')
-          .bind(DEFAULT_OWNER_NAME, hashed, 'active', featuresJson, now, existing.id)
-          .run();
-      }
+    if (!existing) {
+      const id = randomId('usr_');
+      const inviteToken = generateToken(32);
+      await env.DB.prepare(
+        'INSERT INTO users (id,email,name,status,isAdmin,features,inviteToken,inviteExpiresAt,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      )
+        .bind(id, normalizedEmail, DEFAULT_OWNER_NAME, 'pending', 1, featuresJson, inviteToken, null, now, now)
+        .run();
+      logInviteToken(inviteToken);
       return;
     }
-    const id = randomId('usr_');
-    try {
-      await env.DB.prepare(
-        'INSERT INTO users (id,email,name,passwordHash,status,isAdmin,features,createdAt,updatedAt,lastLoginAt,inviteToken,inviteExpiresAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-      )
-        .bind(id, normalizedEmail, DEFAULT_OWNER_NAME, hashed, 'active', 1, featuresJson, now, now, null, null, null)
-        .run();
-    } catch {
-      await env.DB.prepare(
-        'INSERT INTO users (id,email,name,passwordHash,status,isAdmin,features,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?)',
-      )
-        .bind(id, normalizedEmail, DEFAULT_OWNER_NAME, hashed, 'active', 1, featuresJson, now, now)
-        .run();
+    const updates: string[] = [];
+    const bindings: any[] = [];
+    if (existing.name !== DEFAULT_OWNER_NAME) {
+      updates.push('name=?');
+      bindings.push(DEFAULT_OWNER_NAME);
     }
+    if (!existing.features || existing.features === '[]') {
+      updates.push('features=?');
+      bindings.push(featuresJson);
+    }
+    if (!existing.isAdmin) {
+      updates.push('isAdmin=?');
+      bindings.push(1);
+    }
+    if (existing.status === 'disabled') {
+      updates.push('status=?');
+      bindings.push('pending');
+    }
+    let inviteToken: string | null = null;
+    if (!existing.passwordHash && !existing.inviteToken) {
+      inviteToken = generateToken(32);
+      updates.push('inviteToken=?');
+      bindings.push(inviteToken);
+      updates.push('inviteExpiresAt=?');
+      bindings.push(null);
+    }
+    if (updates.length) {
+      updates.push('updatedAt=?');
+      bindings.push(now, existing.id);
+      await env.DB.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id=?`).bind(...bindings).run();
+    }
+    if (inviteToken) logInviteToken(inviteToken);
   } catch (error) {
     console.warn('Default owner bootstrap failed', error);
   }

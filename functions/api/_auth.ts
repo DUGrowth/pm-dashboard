@@ -80,6 +80,7 @@ const rowToUser = (row: any) => ({
   name: row.name,
   isAdmin: Boolean(row.isAdmin),
   status: row.status || 'pending',
+  hasPassword: Boolean(row.passwordHash),
   features: parseFeatures(row.features),
 });
 
@@ -160,7 +161,15 @@ const authorizeViaAccess = async (request: Request, env: any) => {
 
 type AuthSuccess = {
   ok: true;
-  user: { id: string; email: string; name: string; isAdmin: boolean; features: string[]; status: string };
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    isAdmin: boolean;
+    features: string[];
+    status: string;
+    hasPassword?: boolean;
+  };
 };
 type AuthFailure = { ok: false; status: number; error: string };
 
@@ -179,6 +188,7 @@ export async function authorizeRequest(request: Request, env: any): Promise<Auth
         name,
         isAdmin: true,
         status: 'active',
+        hasPassword: true,
         features: ['admin', 'calendar', 'ideas', 'testing', 'approvals', 'kanban'],
       },
     };

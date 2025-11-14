@@ -15,6 +15,7 @@ export const onRequestGet = async ({ request, env }: { request: Request; env: an
     name: auth.user.name,
     isAdmin: auth.user.isAdmin,
     features: auth.user.features,
+    hasPassword: Boolean(auth.user.hasPassword),
     ts: new Date().toISOString(),
   });
 };

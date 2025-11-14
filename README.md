@@ -14,6 +14,7 @@ PM Dashboard (dugrowth/pm-dashboard)
   - `health.ts` → basic health check
   - `notify.ts` → server-side proxy for notifications (Teams webhook; optional email via Brevo/MailChannels)
   - `auth.ts` → password login, invite acceptance, and session management (sets secure cookies)
+  - `password.ts` → authenticated users can rotate their password and refresh their session
   - `users.ts` → admin-only user roster + invitation emails
   - `user.ts` → returns the currently authenticated user (backed by the session cookie)
 - `public/js/copyCheckerClient.js` exposes a tiny client you can import as a module.
@@ -46,7 +47,8 @@ Authentication & user management
 - Configure `MAIL_FROM` / `MAIL_FROM_NAME` (and optionally Brevo credentials) so the worker can send the invitation emails directly. `ADMIN_EMAILS` seeds which accounts should have full admin rights after they accept their invite.
 - Cloudflare Access headers are still understood, so you can keep Zero Trust enabled while migrating. Once confident in the new flow, remove the Access policy so teammates can use the built-in password login from any device.
 - To bootstrap your first admin account, temporarily set `ALLOW_UNAUTHENTICATED=1` (or insert a row directly into `users`) and create an invite for an address listed in `ADMIN_EMAILS`. After accepting the invite, remove the dev override.
-- For convenience, the system seeds a default owner account (`daniel.davis@populationmatters.org` / password `password`) if that email doesn’t already exist. Log in with it once, change the credentials immediately via the “resend invite” flow, and then invite the rest of the team.
+- The worker always ensures a pending owner account (`daniel.davis@populationmatters.org`) exists with admin rights. When that record is missing a password, the worker seeds an invite token (logged to the worker console) so Daniel can activate the account through the invite screen.
+- Signed-in teammates can update their password from the Menu → “Change password” action, which calls `/api/password`, rotates their session cookie, and invalidates older sessions.
 
 Local Development
 1) Serve `index.html` with any static server (or Cloudflare Pages dev).

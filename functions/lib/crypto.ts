@@ -1,3 +1,5 @@
+declare const Buffer: any;
+
 const textEncoder = new TextEncoder();
 
 const toBase64 = (bytes: Uint8Array) => {

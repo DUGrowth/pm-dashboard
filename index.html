@@ -3934,6 +3934,128 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
     );
   }
 
+  function ChangePasswordModal({ open, onClose, requiresCurrent, onSubmit }) {
+    const [currentPassword, setCurrentPassword] = useState("");
+    const [newPassword, setNewPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
+    const [error, setError] = useState("");
+    const [success, setSuccess] = useState("");
+    const [busy, setBusy] = useState(false);
+
+    useEffect(() => {
+      if (!open) {
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+        setError("");
+        setSuccess("");
+        setBusy(false);
+      }
+    }, [open]);
+
+    if (!open) return null;
+
+    const handleSubmit = async (event) => {
+      event.preventDefault();
+      setError("");
+      setSuccess("");
+      if (requiresCurrent && !currentPassword) {
+        setError("Enter your current password.");
+        return;
+      }
+      if (!newPassword || newPassword.length < 8) {
+        setError("Choose a password with at least 8 characters.");
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        setError("New passwords do not match.");
+        return;
+      }
+      setBusy(true);
+      try {
+        await onSubmit({ currentPassword, newPassword });
+        setSuccess("Password updated. Use it the next time you sign in.");
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+      } catch (submitError) {
+        setError(submitError?.message || "Unable to update password.");
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    return (
+      <Modal open={open} onClose={onClose}>
+        <form className="space-y-4 px-6 py-6" onSubmit={handleSubmit}>
+          <div>
+            <h3 className="text-lg font-semibold text-ocean-900">Update password</h3>
+            <p className="text-xs text-graystone-500">
+              {requiresCurrent
+                ? "Enter your current password and choose a new one (minimum 8 characters)."
+                : "Set a password so you can sign in without requesting a new invite."}
+            </p>
+          </div>
+          {requiresCurrent ? (
+            <div className="space-y-2">
+              <Label className="text-sm text-graystone-600" htmlFor="account-current-password">
+                Current password
+              </Label>
+              <Input
+                id="account-current-password"
+                type="password"
+                autoComplete="current-password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
+              />
+            </div>
+          ) : null}
+          <div className="space-y-2">
+            <Label className="text-sm text-graystone-600" htmlFor="account-new-password">
+              New password
+            </Label>
+            <Input
+              id="account-new-password"
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm text-graystone-600" htmlFor="account-new-password-confirm">
+              Confirm new password
+            </Label>
+            <Input
+              id="account-new-password-confirm"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              className="w-full rounded-2xl border border-graystone-200 px-4 py-3 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
+            />
+          </div>
+          {error ? (
+            <div className="rounded-2xl bg-rose-50 px-4 py-2 text-sm text-rose-700">{error}</div>
+          ) : null}
+          {success ? (
+            <div className="rounded-2xl bg-emerald-50 px-4 py-2 text-sm text-emerald-700">{success}</div>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={busy}>
+              {busy ? "Saving..." : "Save password"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+    );
+  }
+
   function AccessModal({ open, onClose, user, features = [], onSave }) {
     const [selectedFeatures, setSelectedFeatures] = useState(features);
     useEffect(() => {
@@ -6000,6 +6122,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [currentUser, setCurrentUser] = useState("");
         const [currentUserFeatures, setCurrentUserFeatures] = useState(() => []);
         const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState(false);
+        const [currentUserHasPassword, setCurrentUserHasPassword] = useState(false);
         const [authStatus, setAuthStatus] = useState("loading");
         const [authError, setAuthError] = useState("");
         const [currentView, setCurrentView] = useState("menu");
@@ -6025,6 +6148,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [performanceImportOpen, setPerformanceImportOpen] = useState(false);
         const [approvalsModalOpen, setApprovalsModalOpen] = useState(false);
         const [menuMotionActive, setMenuMotionActive] = useState(false);
+        const [changePasswordOpen, setChangePasswordOpen] = useState(false);
         const [pendingAssetType, setPendingAssetType] = useState(null);
         const [assetGoals, setAssetGoals] = useState(() => ({
           Video: 40,
@@ -6089,12 +6213,14 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             setCurrentUser(nextName);
             setCurrentUserFeatures(ensureFeaturesList(payload?.features));
             setCurrentUserIsAdmin(Boolean(payload?.isAdmin));
+            setCurrentUserHasPassword(Boolean(payload?.hasPassword));
             setAuthStatus("ready");
           } catch (error) {
             console.warn("Failed to fetch authenticated user", error);
             setCurrentUser("");
             setCurrentUserFeatures([]);
             setCurrentUserIsAdmin(false);
+            setCurrentUserHasPassword(false);
             setUserList([]);
             setAccessModalUser(null);
             setAuthError("Unable to verify your session. Please sign in below.");
@@ -6166,6 +6292,38 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             // ignore
           }
         };
+
+        const handleChangePassword = useCallback(
+          async ({ currentPassword, newPassword }) => {
+            const payload = { currentPassword, newPassword };
+            const submit = async () => {
+              if (window.api && window.api.enabled && window.api.changePassword) {
+                return window.api.changePassword(payload);
+              }
+              const res = await fetch("/api/password", {
+                method: "PUT",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) {
+                const detail = data?.error ? String(data.error) : `HTTP_${res.status}`;
+                throw new Error(detail);
+              }
+              return data;
+            };
+            try {
+              const response = await submit();
+              setCurrentUserHasPassword(true);
+              return response;
+            } catch (error) {
+              console.error("Failed to update password", error);
+              if (error instanceof Error) throw error;
+              throw new Error("Unable to update password.");
+            }
+          },
+          [setCurrentUserHasPassword]
+        );
 
         const addApprover = () => {
           const next = newApproverName.trim();
@@ -7352,12 +7510,14 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             setCurrentUser("");
             setCurrentUserFeatures([]);
             setCurrentUserIsAdmin(false);
+            setCurrentUserHasPassword(false);
             setAuthStatus("login");
             resetLoginFields();
             setCurrentView("menu");
             closeEntry();
             setUserList([]);
             setAccessModalUser(null);
+            setChangePasswordOpen(false);
           })();
         };
 
@@ -7393,6 +7553,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             setCurrentUser(name);
             setCurrentUserFeatures(ensureFeaturesList(response?.user?.features));
             setCurrentUserIsAdmin(Boolean(response?.user?.isAdmin));
+            setCurrentUserHasPassword(Boolean(response?.user?.hasPassword));
             setAuthStatus("ready");
             setAuthError("");
             resetLoginFields();
@@ -7452,6 +7613,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             setCurrentUser(name);
             setCurrentUserFeatures(ensureFeaturesList(response?.user?.features));
             setCurrentUserIsAdmin(Boolean(response?.user?.isAdmin));
+            setCurrentUserHasPassword(Boolean(response?.user?.hasPassword));
             setInviteToken("");
             setInvitePassword("");
             setInvitePasswordConfirm("");
@@ -8251,6 +8413,13 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                     </Button>
                     <Button
                       variant="ghost"
+                      onClick={() => setChangePasswordOpen(true)}
+                      className="heading-font text-sm normal-case"
+                    >
+                      Change password
+                    </Button>
+                    <Button
+                      variant="ghost"
                       onClick={handleSignOut}
                       className="heading-font text-sm normal-case"
                     >
@@ -8938,6 +9107,12 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 onSave={handleAccessSave}
               />
             )}
+            <ChangePasswordModal
+              open={changePasswordOpen}
+              requiresCurrent={currentUserHasPassword}
+              onClose={() => setChangePasswordOpen(false)}
+              onSubmit={handleChangePassword}
+            />
             <GuidelinesModal
               open={guidelinesOpen}
               guidelines={guidelines}
