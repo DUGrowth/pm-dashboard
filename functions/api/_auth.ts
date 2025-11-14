@@ -16,6 +16,9 @@ const NAME_HEADERS = [
 ];
 
 const SESSION_COOKIE = 'pm_session';
+const ACCESS_OVERRIDE_COOKIE = 'pm_access_override';
+const BASE_FEATURES = ['calendar', 'kanban', 'approvals', 'ideas', 'linkedin', 'testing'];
+const ADMIN_FEATURES = [...BASE_FEATURES, 'admin'];
 
 const headerValue = (request: Request, names: string[]) => {
   for (const name of names) {
@@ -33,6 +36,29 @@ const toSet = (value: string | undefined | null) => {
       .map((email) => email.trim().toLowerCase())
       .filter(Boolean),
   );
+};
+
+const parseFeatureEnv = (value: string | undefined, fallback: string[]) => {
+  if (!value) return fallback;
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.filter((entry) => typeof entry === 'string' && entry.trim()).map((entry) => entry.trim());
+  } catch {
+    return value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+  return fallback;
+};
+
+const featureJsonForAccess = (env: any, isAdmin: boolean) => {
+  const fallback = isAdmin ? ADMIN_FEATURES : BASE_FEATURES;
+  const envValue = isAdmin ? env.ACCESS_ADMIN_FEATURES : env.ACCESS_DEFAULT_FEATURES;
+  const list = Array.isArray(envValue)
+    ? (envValue as string[])
+    : parseFeatureEnv(typeof envValue === 'string' ? envValue : '', fallback);
+  return JSON.stringify(list.length ? list : fallback);
 };
 
 const parseFeatures = (value: string | null | undefined) => {
@@ -70,23 +96,36 @@ const parseCookies = (header: string | null) => {
 const ensureUserForAccess = async (env: any, email: string, name: string) => {
   const normalized = email.toLowerCase();
   const existing = await env.DB.prepare('SELECT * FROM users WHERE email=?').bind(normalized).first();
-  if (existing) return rowToUser(existing);
-  if (env.ACCESS_AUTO_PROVISION === '0') return null;
   const now = new Date().toISOString();
   const isAdmin = toSet(env.ADMIN_EMAILS || env.ACCESS_ALLOWED_EMAILS).has(normalized) ? 1 : 0;
+  const featuresJson = featureJsonForAccess(env, Boolean(isAdmin));
+  if (existing) {
+    const needsFeatures = !existing.features || existing.features === '[]';
+    const needsAdmin = Number(existing.isAdmin) !== (isAdmin ? 1 : 0);
+    const needsName = name && name.trim() && name.trim() !== existing.name;
+    if (needsFeatures || needsAdmin || needsName) {
+      await env.DB.prepare('UPDATE users SET name=?, isAdmin=?, status=?, features=?, updatedAt=? WHERE id=?')
+        .bind(name || existing.name || email, isAdmin ? 1 : 0, 'active', featuresJson, now, existing.id)
+        .run();
+      const updated = await env.DB.prepare('SELECT * FROM users WHERE id=?').bind(existing.id).first();
+      return rowToUser(updated);
+    }
+    return rowToUser(existing);
+  }
+  if (env.ACCESS_AUTO_PROVISION === '0') return null;
   const id = randomId('usr_');
   await env.DB.prepare(
-    'INSERT INTO users (id,email,name,status,isAdmin,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?)',
+    'INSERT INTO users (id,email,name,status,isAdmin,features,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?)',
   )
-    .bind(id, normalized, name || email, 'active', isAdmin, now, now)
+    .bind(id, normalized, name || email, 'active', isAdmin ? 1 : 0, featuresJson, now, now)
     .run();
   const row = await env.DB.prepare('SELECT * FROM users WHERE id=?').bind(id).first();
   return rowToUser(row);
 };
 
-const authorizeViaSession = async (request: Request, env: any) => {
-  const cookies = parseCookies(request.headers.get('cookie'));
-  const token = cookies[SESSION_COOKIE];
+const authorizeViaSession = async (request: Request, env: any, cookies?: Record<string, string>) => {
+  const cookieMap = cookies || parseCookies(request.headers.get('cookie'));
+  const token = cookieMap[SESSION_COOKIE];
   if (!token) return null;
   const tokenHash = await hashToken(token);
   const session = await env.DB.prepare('SELECT * FROM sessions WHERE tokenHash=?').bind(tokenHash).first();
@@ -127,6 +166,8 @@ type AuthFailure = { ok: false; status: number; error: string };
 
 export async function authorizeRequest(request: Request, env: any): Promise<AuthSuccess | AuthFailure> {
   await ensureDefaultOwner(env);
+  const cookies = parseCookies(request.headers.get('cookie'));
+  const accessOverride = cookies[ACCESS_OVERRIDE_COOKIE] === '1';
   if (env.ALLOW_UNAUTHENTICATED === '1' || env.ACCESS_ALLOW_UNAUTHENTICATED === '1') {
     const email = env.DEV_AUTH_EMAIL || 'dev@example.com';
     const name = env.DEV_AUTH_NAME || 'Dev User';
@@ -143,12 +184,12 @@ export async function authorizeRequest(request: Request, env: any): Promise<Auth
     };
   }
 
-  const sessionUser = await authorizeViaSession(request, env);
+  const sessionUser = await authorizeViaSession(request, env, cookies);
   if (sessionUser) {
     return { ok: true, user: sessionUser };
   }
 
-  const accessUser = await authorizeViaAccess(request, env);
+  const accessUser = accessOverride ? null : await authorizeViaAccess(request, env);
   if (accessUser && !('error' in accessUser)) {
     return { ok: true, user: accessUser };
   }

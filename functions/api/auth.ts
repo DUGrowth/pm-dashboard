@@ -2,10 +2,17 @@ import { hashPassword, hashToken, generateToken, randomId, verifyPassword } from
 import { ensureDefaultOwner } from '../lib/bootstrap';
 
 const SESSION_COOKIE = 'pm_session';
+const ACCESS_OVERRIDE_COOKIE = 'pm_access_override';
 
-const json = (data: unknown, status = 200, cookie?: string) => {
+const setAccessOverrideCookie = `${ACCESS_OVERRIDE_COOKIE}=1; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`;
+const clearAccessOverrideCookie = `${ACCESS_OVERRIDE_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+
+const json = (data: unknown, status = 200, cookies?: string | string[]) => {
   const headers = new Headers({ 'content-type': 'application/json' });
-  if (cookie) headers.append('set-cookie', cookie);
+  if (cookies) {
+    const list = Array.isArray(cookies) ? cookies : [cookies];
+    list.filter(Boolean).forEach((cookie) => headers.append('set-cookie', cookie));
+  }
   return new Response(JSON.stringify(data), { status, headers });
 };
 
@@ -104,11 +111,7 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: a
     .bind(new Date().toISOString(), user.status === 'pending' ? 'active' : user.status, user.id)
     .run();
   const session = await createSession(request, env, user.id);
-  return json(
-    { ok: true, user: sanitizeUser(user) },
-    200,
-    cookieString(session.token, session.ttl),
-  );
+  return json({ ok: true, user: sanitizeUser(user) }, 200, [cookieString(session.token, session.ttl), clearAccessOverrideCookie]);
 };
 
 export const onRequestPut = async ({ request, env }: { request: Request; env: any }) => {
@@ -132,14 +135,10 @@ export const onRequestPut = async ({ request, env }: { request: Request; env: an
     .bind(hashed, 'active', nextName, now.toISOString(), now.toISOString(), row.id)
     .run();
   const session = await createSession(request, env, row.id);
-  return json(
-    { ok: true, user: sanitizeUser({ ...row, name: nextName }) },
-    200,
-    cookieString(session.token, session.ttl),
-  );
+  return json({ ok: true, user: sanitizeUser({ ...row, name: nextName }) }, 200, [cookieString(session.token, session.ttl), clearAccessOverrideCookie]);
 };
 
 export const onRequestDelete = async ({ request, env }: { request: Request; env: any }) => {
   await destroySessionFromRequest(request, env);
-  return json({ ok: true }, 200, clearCookie);
+  return json({ ok: true }, 200, [clearCookie, setAccessOverrideCookie]);
 };
