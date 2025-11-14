@@ -16,36 +16,56 @@ const DEFAULT_OWNER_FEATURES = [
 const UPSERT_COLUMNS =
   'name=?, passwordHash=?, status=?, isAdmin=1, features=?, inviteToken=NULL, inviteExpiresAt=NULL, updatedAt=?, lastLoginAt=NULL';
 
+const USER_ALTERS = [
+  'ALTER TABLE users ADD COLUMN inviteToken TEXT',
+  'ALTER TABLE users ADD COLUMN inviteExpiresAt TEXT',
+  'ALTER TABLE users ADD COLUMN features TEXT',
+  "ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'pending'",
+  'ALTER TABLE users ADD COLUMN isAdmin INTEGER DEFAULT 0',
+  'ALTER TABLE users ADD COLUMN lastLoginAt TEXT',
+];
+
+async function ensureSchema(env: any) {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      passwordHash TEXT,
+      inviteToken TEXT,
+      inviteExpiresAt TEXT,
+      features TEXT,
+      status TEXT DEFAULT 'pending',
+      isAdmin INTEGER DEFAULT 0,
+      createdAt TEXT,
+      updatedAt TEXT,
+      lastLoginAt TEXT
+    )`,
+  ).run();
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      userId TEXT NOT NULL,
+      tokenHash TEXT NOT NULL,
+      createdAt TEXT,
+      expiresAt TEXT,
+      userAgent TEXT,
+      ip TEXT
+    )`,
+  ).run();
+  for (const sql of USER_ALTERS) {
+    try {
+      await env.DB.prepare(sql).run();
+    } catch {
+      // Column already exists; ignore
+    }
+  }
+}
+
 export async function ensureDefaultOwner(env: any) {
   try {
     if (!env?.DB) return;
-    await env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        email TEXT UNIQUE NOT NULL,
-        name TEXT NOT NULL,
-        passwordHash TEXT,
-        inviteToken TEXT,
-        inviteExpiresAt TEXT,
-        features TEXT,
-        status TEXT DEFAULT 'pending',
-        isAdmin INTEGER DEFAULT 0,
-        createdAt TEXT,
-        updatedAt TEXT,
-        lastLoginAt TEXT
-      )`,
-    ).run();
-    await env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS sessions (
-        id TEXT PRIMARY KEY,
-        userId TEXT NOT NULL,
-        tokenHash TEXT NOT NULL,
-        createdAt TEXT,
-        expiresAt TEXT,
-        userAgent TEXT,
-        ip TEXT
-      )`,
-    ).run();
+    await ensureSchema(env);
     const normalizedEmail = DEFAULT_OWNER_EMAIL.toLowerCase();
     const existing = await env.DB.prepare('SELECT * FROM users WHERE email=?').bind(normalizedEmail).first();
     if (existing && existing.passwordHash && existing.lastLoginAt) return;
