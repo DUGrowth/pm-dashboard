@@ -107,6 +107,8 @@ CREATE TABLE IF NOT EXISTS users (
   features TEXT,
   status TEXT DEFAULT 'pending',
   isAdmin INTEGER DEFAULT 0,
+  isApprover INTEGER DEFAULT 0,
+  avatarUrl TEXT,
   createdAt TEXT,
   updatedAt TEXT,
   lastLoginAt TEXT

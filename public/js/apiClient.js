@@ -169,6 +169,15 @@ async function getCurrentUser() {
   return toJson(r);
 }
 
+async function updateProfile(payload) {
+  const r = await fetch('/api/user', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return toJson(r);
+}
+
 async function login(credentials) {
   const r = await fetch('/api/auth', {
     method: 'POST',
@@ -189,6 +198,20 @@ async function acceptInvite(payload) {
 
 async function logout() {
   const r = await fetch('/api/auth', { method: 'DELETE' });
+  return toJson(r);
+}
+
+async function changePassword(payload) {
+  const r = await fetch('/api/password', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return toJson(r);
+}
+
+async function listApprovers() {
+  const r = await fetch('/api/approvers', { method: 'GET' });
   return toJson(r);
 }
 
@@ -247,8 +270,11 @@ async function deleteUserRemote(id) {
         getGuidelines,
         saveGuidelines: saveGuidelinesRemote,
         getCurrentUser,
+        updateProfile,
         login,
         logout,
+        changePassword,
+        listApprovers,
         acceptInvite,
         listUsers: listUsersRemote,
         createUser: createUserRemote,

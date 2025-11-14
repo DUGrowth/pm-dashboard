@@ -80,6 +80,8 @@ const rowToUser = (row: any) => ({
   name: row.name,
   isAdmin: Boolean(row.isAdmin),
   status: row.status || 'pending',
+  isApprover: Boolean(row.isApprover),
+  avatarUrl: row.avatarUrl || null,
   hasPassword: Boolean(row.passwordHash),
   features: parseFeatures(row.features),
 });
@@ -169,6 +171,8 @@ type AuthSuccess = {
     features: string[];
     status: string;
     hasPassword?: boolean;
+    isApprover?: boolean;
+    avatarUrl?: string | null;
   };
 };
 type AuthFailure = { ok: false; status: number; error: string };
@@ -188,6 +192,8 @@ export async function authorizeRequest(request: Request, env: any): Promise<Auth
         name,
         isAdmin: true,
         status: 'active',
+        isApprover: true,
+        avatarUrl: null,
         hasPassword: true,
         features: ['admin', 'calendar', 'ideas', 'testing', 'approvals', 'kanban'],
       },

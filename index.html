@@ -136,7 +136,7 @@
     <script type="text/babel" data-presets="env,react" src="/public/js/components/copyCheckSection.jsx"></script>
 
     <script type="text/babel" data-presets="env,react">
-      const { useState, useMemo, useEffect, useCallback } = React;
+      const { useState, useMemo, useEffect, useCallback, useRef } = React;
 
       const ASSET_TYPES = ["No asset", "Video", "Design", "Carousel"];
       const IDEA_TYPES = ["Topic", "Theme", "Series", "Campaign", "Other"];
@@ -363,24 +363,6 @@
       const LINKEDIN_STORAGE_KEY = "pm-content-dashboard-linkedin";
       const TESTING_STORAGE_KEY = "pm-content-dashboard-testing";
       const storageAvailable = typeof window !== "undefined" && typeof window.localStorage !== "undefined";
-      const APPROVER_STORAGE_KEY = "pm-dashboard-approvers-v1";
-      const loadApprovers = () => {
-        if (!storageAvailable) return DEFAULT_APPROVERS;
-        try {
-          const raw = window.localStorage.getItem(APPROVER_STORAGE_KEY);
-          if (!raw) return DEFAULT_APPROVERS;
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length) return parsed;
-        } catch {}
-        return DEFAULT_APPROVERS;
-      };
-      const saveApprovers = (next) => {
-        if (!storageAvailable) return;
-        try {
-          window.localStorage.setItem(APPROVER_STORAGE_KEY, JSON.stringify(next));
-        } catch {}
-      };
-
       const cx = (...xs) => xs.filter(Boolean).join(" ");
   const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
   const monthStartISO = (d) => new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
@@ -3042,13 +3024,14 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
     );
   }
 
-  function LinkedInSubmissionForm({ onSubmit, currentUser }) {
+  function LinkedInSubmissionForm({ onSubmit, currentUser, approverOptions = DEFAULT_APPROVERS }) {
+    const approverChoices = approverOptions.length ? approverOptions : DEFAULT_APPROVERS;
     const [submissionType, setSubmissionType] = useState(LINKEDIN_TYPES[0]);
-    const initialOwner = DEFAULT_APPROVERS.includes(currentUser) ? currentUser : DEFAULT_APPROVERS[0];
-    const [owner, setOwner] = useState(initialOwner);
-    const [submitter, setSubmitter] = useState(
-      DEFAULT_APPROVERS.includes(currentUser) ? currentUser : DEFAULT_APPROVERS[0]
-    );
+    const fallbackPerson = approverChoices.includes(currentUser)
+      ? currentUser
+      : approverChoices[0] || currentUser;
+    const [owner, setOwner] = useState(fallbackPerson);
+    const [submitter, setSubmitter] = useState(fallbackPerson);
     const [postCopy, setPostCopy] = useState("");
     const [comments, setComments] = useState("");
     const [status, setStatus] = useState(LINKEDIN_STATUSES[0]);
@@ -3058,16 +3041,19 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
     const [title, setTitle] = useState("LinkedIn draft");
 
     useEffect(() => {
-      if (DEFAULT_APPROVERS.includes(currentUser)) {
+      if (approverChoices.includes(currentUser)) {
         setOwner(currentUser);
         setSubmitter(currentUser);
       }
-    }, [currentUser]);
+    }, [currentUser, approverChoices]);
 
     const reset = () => {
       setSubmissionType(LINKEDIN_TYPES[0]);
-      setOwner(DEFAULT_APPROVERS.includes(currentUser) ? currentUser : DEFAULT_APPROVERS[0]);
-      setSubmitter(DEFAULT_APPROVERS.includes(currentUser) ? currentUser : DEFAULT_APPROVERS[0]);
+      const resetValue = approverChoices.includes(currentUser)
+        ? currentUser
+        : approverChoices[0] || currentUser;
+      setOwner(resetValue);
+      setSubmitter(resetValue);
       setTitle("LinkedIn draft");
       setPostCopy("");
       setComments("");
@@ -3187,7 +3173,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                   onChange={(event) => setOwner(event.target.value)}
                   className={cx(selectBaseClasses, "w-full")}
                 >
-                  {DEFAULT_APPROVERS.map((person) => (
+                  {approverChoices.map((person) => (
                     <option key={person} value={person}>
                       {person}
                     </option>
@@ -3201,7 +3187,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                   onChange={(event) => setSubmitter(event.target.value)}
                   className={cx(selectBaseClasses, "w-full")}
                 >
-                  {DEFAULT_APPROVERS.map((person) => (
+                  {approverChoices.map((person) => (
                     <option key={person} value={person}>
                       {person}
                     </option>
@@ -6120,6 +6106,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [adminAudits, setAdminAudits] = useState([]);
         const [selectedFrameworkId, setSelectedFrameworkId] = useState("");
         const [currentUser, setCurrentUser] = useState("");
+        const [currentUserEmail, setCurrentUserEmail] = useState("");
+        const [currentUserAvatar, setCurrentUserAvatar] = useState("");
         const [currentUserFeatures, setCurrentUserFeatures] = useState(() => []);
         const [currentUserIsAdmin, setCurrentUserIsAdmin] = useState(false);
         const [currentUserHasPassword, setCurrentUserHasPassword] = useState(false);
@@ -6157,16 +6145,23 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         }));
         const [guidelines, setGuidelines] = useState(() => loadGuidelines());
         const [guidelinesOpen, setGuidelinesOpen] = useState(false);
-        const [approverList, setApproverList] = useState(() => loadApprovers());
-        const [newApproverName, setNewApproverName] = useState("");
+        const [approverDirectory, setApproverDirectory] = useState(DEFAULT_APPROVERS);
         const [userList, setUserList] = useState(() => []);
         const [newUserFirst, setNewUserFirst] = useState("");
         const [newUserLast, setNewUserLast] = useState("");
         const [newUserEmail, setNewUserEmail] = useState("");
         const [newUserFeatures, setNewUserFeatures] = useState(() => [...DEFAULT_FEATURES]);
+        const [newUserIsApprover, setNewUserIsApprover] = useState(false);
         const [accessModalUser, setAccessModalUser] = useState(null);
         const [userAdminError, setUserAdminError] = useState("");
         const [userAdminSuccess, setUserAdminSuccess] = useState("");
+        const profileMenuRef = useRef(null);
+        const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+        const [profileFormName, setProfileFormName] = useState("");
+        const [profileAvatarDraft, setProfileAvatarDraft] = useState("");
+        const [profileStatus, setProfileStatus] = useState("");
+        const [profileError, setProfileError] = useState("");
+        const [profileSaving, setProfileSaving] = useState(false);
         const [deepLinkEntryId, setDeepLinkEntryId] = useState(() => {
           if (typeof window === 'undefined') return '';
           try {
@@ -6194,6 +6189,23 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           canUseLinkedIn ||
           canUseTesting ||
           currentUserIsAdmin;
+        const profileInitials = useMemo(() => {
+          const base = (currentUser && currentUser.trim()) || currentUserEmail || "U";
+          const parts = base.split(/\s+/).filter(Boolean);
+          if (!parts.length) return base.slice(0, 2).toUpperCase();
+          const first = parts[0]?.[0] || "";
+          const last = parts.length > 1 ? parts[parts.length - 1]?.[0] : parts[0]?.[1] || "";
+          return (first + last).toUpperCase();
+        }, [currentUser, currentUserEmail]);
+        const avatarPreview = profileAvatarDraft !== "" ? profileAvatarDraft : currentUserAvatar;
+        const approverOptions = useMemo(() => {
+          const derived = userList
+            .filter((user) => user.isApprover && user.status !== "disabled")
+            .map((user) => (user.name && user.name.trim()) || user.email)
+            .filter(Boolean);
+          if (derived.length) return derived;
+          return approverDirectory;
+        }, [userList, approverDirectory]);
         const hydrateCurrentUser = useCallback(async () => {
           setAuthStatus("loading");
           setAuthError("");
@@ -6211,6 +6223,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 ? String(payload.name).trim()
                 : String(payload?.email || "");
             setCurrentUser(nextName);
+            setCurrentUserEmail(String(payload?.email || ""));
+            setCurrentUserAvatar(String(payload?.avatarUrl || ""));
             setCurrentUserFeatures(ensureFeaturesList(payload?.features));
             setCurrentUserIsAdmin(Boolean(payload?.isAdmin));
             setCurrentUserHasPassword(Boolean(payload?.hasPassword));
@@ -6218,6 +6232,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           } catch (error) {
             console.warn("Failed to fetch authenticated user", error);
             setCurrentUser("");
+            setCurrentUserEmail("");
+            setCurrentUserAvatar("");
             setCurrentUserFeatures([]);
             setCurrentUserIsAdmin(false);
             setCurrentUserHasPassword(false);
@@ -6225,6 +6241,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             setAccessModalUser(null);
             setAuthError("Unable to verify your session. Please sign in below.");
             setAuthStatus(inviteToken ? "invite" : "login");
+            setProfileMenuOpen(false);
           }
         }, [inviteToken]);
 
@@ -6269,9 +6286,6 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           }
         }, [currentView, hasFeature, currentUserIsAdmin, canUseCalendar, canUseApprovals]);
 
-        useEffect(() => {
-          saveApprovers(approverList);
-        }, [approverList]);
         const notifyViaServer = (payload) => {
           if (typeof window === "undefined" || !payload) return;
           if (window.api && window.api.enabled && window.api.notify) {
@@ -6324,18 +6338,131 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           },
           [setCurrentUserHasPassword]
         );
+        const refreshApprovers = useCallback(async () => {
+          try {
+            let payload = null;
+            if (window.api && typeof window.api.listApprovers === "function") {
+              payload = await window.api.listApprovers();
+            } else {
+              const res = await fetch("/api/approvers", { method: "GET" });
+              if (!res.ok) throw new Error(`HTTP_${res.status}`);
+              payload = await res.json();
+            }
+            if (Array.isArray(payload) && payload.length) {
+              setApproverDirectory(
+                payload
+                  .map((entry) => {
+                    if (!entry) return "";
+                    if (entry.name && String(entry.name).trim().length) return String(entry.name).trim();
+                    if (entry.email && String(entry.email).trim().length) return String(entry.email).trim();
+                    return "";
+                  })
+                  .filter(Boolean),
+              );
+            } else {
+              setApproverDirectory(DEFAULT_APPROVERS);
+            }
+          } catch (error) {
+            console.warn("Failed to load approvers", error);
+            setApproverDirectory(DEFAULT_APPROVERS);
+          }
+        }, []);
 
-        const addApprover = () => {
-          const next = newApproverName.trim();
-          if (!next) return;
-          setApproverList((prev) => {
-            if (prev.includes(next)) return prev;
-            return [...prev, next];
-          });
-          setNewApproverName("");
+        useEffect(() => {
+          refreshApprovers();
+        }, [refreshApprovers]);
+
+        const PROFILE_IMAGE_LIMIT = 200 * 1024;
+
+        const openProfileMenu = () => {
+          setProfileFormName(currentUser || currentUserEmail || "");
+          setProfileAvatarDraft(currentUserAvatar || "");
+          setProfileStatus("");
+          setProfileError("");
+          setProfileMenuOpen(true);
         };
-        const removeApprover = (name) => {
-          setApproverList((prev) => prev.filter((item) => item !== name));
+
+        const closeProfileMenu = () => {
+          setProfileMenuOpen(false);
+        };
+
+        const handleProfileMenuToggle = () => {
+          if (profileMenuOpen) {
+            closeProfileMenu();
+            return;
+          }
+          openProfileMenu();
+        };
+
+        useEffect(() => {
+          if (!profileMenuOpen) return;
+          const handleClick = (event) => {
+            if (!profileMenuRef.current) return;
+            if (!profileMenuRef.current.contains(event.target)) {
+              closeProfileMenu();
+            }
+          };
+          document.addEventListener("mousedown", handleClick);
+          return () => document.removeEventListener("mousedown", handleClick);
+        }, [profileMenuOpen]);
+
+        const handleAvatarFileChange = (event) => {
+          const file = event.target?.files && event.target.files[0];
+          if (!file) return;
+          if (file.size > PROFILE_IMAGE_LIMIT) {
+            setProfileError("Image must be under 200KB.");
+            event.target.value = "";
+            return;
+          }
+          const reader = new FileReader();
+          reader.onload = () => {
+            setProfileAvatarDraft(typeof reader.result === "string" ? reader.result : "");
+            setProfileError("");
+          };
+          reader.onerror = () => {
+            setProfileError("Unable to read the selected image.");
+          };
+          reader.readAsDataURL(file);
+          event.target.value = "";
+        };
+
+        const handleProfileSave = async (event) => {
+          event.preventDefault();
+          const desiredName = profileFormName.trim() || currentUser || currentUserEmail;
+          const payload = { name: desiredName };
+          if ((profileAvatarDraft || "") !== (currentUserAvatar || "")) {
+            payload.avatar = profileAvatarDraft ? profileAvatarDraft : null;
+          }
+          setProfileSaving(true);
+          setProfileStatus("");
+          setProfileError("");
+          try {
+            let response = null;
+            if (window.api && typeof window.api.updateProfile === "function") {
+              response = await window.api.updateProfile(payload);
+            } else {
+              const res = await fetch("/api/user", {
+                method: "PUT",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+              if (!res.ok) throw new Error(`HTTP_${res.status}`);
+              response = await res.json();
+            }
+            if (response?.user) {
+              setCurrentUser(response.user.name || desiredName);
+              setCurrentUserEmail(response.user.email || currentUserEmail);
+              setCurrentUserAvatar(response.user.avatarUrl || "");
+            } else {
+              setCurrentUser(desiredName);
+            }
+            setProfileStatus("Profile updated.");
+          } catch (error) {
+            console.error("Failed to update profile", error);
+            setProfileError(error instanceof Error ? error.message : "Unable to update profile.");
+          } finally {
+            setProfileSaving(false);
+          }
         };
         const addUser = async () => {
           setUserAdminError("");
@@ -6357,7 +6484,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           }
           try {
             const created = await window.api
-              .createUser({ name: fullname, email, features: selectedFeatures })
+              .createUser({ name: fullname, email, features: selectedFeatures, isApprover: newUserIsApprover })
               .catch((error) => {
                 throw error;
               });
@@ -6367,6 +6494,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 return [created, ...without];
               });
               setUserAdminSuccess(`Invitation sent to ${email}.`);
+              refreshApprovers();
             }
           } catch (error) {
             console.error(error);
@@ -6376,6 +6504,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           setNewUserLast("");
           setNewUserEmail("");
           setNewUserFeatures([...DEFAULT_FEATURES]);
+          setNewUserIsApprover(false);
         };
         const removeUser = async (user) => {
           if (!user?.id) return;
@@ -6393,6 +6522,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             await window.api.deleteUser(user.id);
             setUserList((prev) => prev.filter((item) => item.id !== user.id));
             setUserAdminSuccess(`Removed ${user.name || user.email}.`);
+            refreshApprovers();
           } catch (error) {
             console.error(error);
             setUserAdminError("Unable to remove user.");
@@ -6402,6 +6532,35 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           setNewUserFeatures((prev) =>
             prev.includes(feature) ? prev.filter((item) => item !== feature) : [...prev, feature]
           );
+        };
+        const toggleApproverRole = async (user) => {
+          if (!user?.id) return;
+          setUserAdminError("");
+          setUserAdminSuccess("");
+          if (!currentUserIsAdmin) {
+            setUserAdminError("You do not have permission to manage users.");
+            return;
+          }
+          if (!window.api || typeof window.api.updateUser !== "function") {
+            setUserAdminError("Server is offline.");
+            return;
+          }
+          try {
+            const nextValue = !user.isApprover;
+            const result = await window.api.updateUser(user.id, { isApprover: nextValue });
+            if (result?.user) {
+              setUserList((prev) => prev.map((entry) => (entry.id === result.user.id ? result.user : entry)));
+              setUserAdminSuccess(
+                `${nextValue ? "Added" : "Removed"} ${user.name || user.email} ${
+                  nextValue ? "to" : "from"
+                } the approver list.`,
+              );
+              refreshApprovers();
+            }
+          } catch (error) {
+            console.error(error);
+            setUserAdminError("Unable to update approver status.");
+          }
         };
         const handleAccessSave = async (features) => {
           if (!accessModalUser) return;
@@ -6421,6 +6580,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               setUserList((prev) =>
                 prev.map((user) => (user.id === result.user.id ? result.user : user))
               );
+              refreshApprovers();
             }
           } catch (error) {
             console.error(error);
@@ -7508,6 +7668,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               }
             } catch {}
             setCurrentUser("");
+            setCurrentUserEmail("");
+            setCurrentUserAvatar("");
             setCurrentUserFeatures([]);
             setCurrentUserIsAdmin(false);
             setCurrentUserHasPassword(false);
@@ -7518,6 +7680,12 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             setUserList([]);
             setAccessModalUser(null);
             setChangePasswordOpen(false);
+            setApproverDirectory(DEFAULT_APPROVERS);
+            setProfileMenuOpen(false);
+            setProfileFormName("");
+            setProfileAvatarDraft("");
+            setProfileStatus("");
+            setProfileError("");
           })();
         };
 
@@ -7551,6 +7719,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 ? response.user.name.trim()
                 : normalizedEmail;
             setCurrentUser(name);
+            setCurrentUserEmail(response?.user?.email || normalizedEmail);
+            setCurrentUserAvatar(response?.user?.avatarUrl || "");
             setCurrentUserFeatures(ensureFeaturesList(response?.user?.features));
             setCurrentUserIsAdmin(Boolean(response?.user?.isAdmin));
             setCurrentUserHasPassword(Boolean(response?.user?.hasPassword));
@@ -7611,6 +7781,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 ? response.user.name.trim()
                 : response?.user?.email || "";
             setCurrentUser(name);
+            setCurrentUserEmail(response?.user?.email || "");
+            setCurrentUserAvatar(response?.user?.avatarUrl || "");
             setCurrentUserFeatures(ensureFeaturesList(response?.user?.features));
             setCurrentUserIsAdmin(Boolean(response?.user?.isAdmin));
             setCurrentUserHasPassword(Boolean(response?.user?.hasPassword));
@@ -7768,6 +7940,114 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
 
         return (
           <div className="mx-auto max-w-7xl px-4 py-8">
+            <div className="mb-6 flex justify-end">
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={handleProfileMenuToggle}
+                  className="flex items-center gap-2 rounded-full border border-graystone-200 bg-white px-3 py-1.5 text-sm font-semibold text-graystone-700 shadow-sm transition hover:border-ocean-200"
+                >
+                  {currentUserAvatar ? (
+                    <img
+                      src={currentUserAvatar}
+                      alt={currentUser || currentUserEmail || "Profile"}
+                      className="h-8 w-8 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-ocean-600 text-xs font-semibold text-white">
+                      {profileInitials}
+                    </span>
+                  )}
+                  <span className="hidden sm:inline">{currentUser || currentUserEmail}</span>
+                  <ChevronDownIcon className="h-4 w-4 text-graystone-400" />
+                </button>
+                {profileMenuOpen ? (
+                  <div
+                    ref={profileMenuRef}
+                    className="absolute right-0 z-50 mt-3 w-72 max-w-xs rounded-3xl border border-graystone-200 bg-white p-4 shadow-2xl"
+                  >
+                    <form className="space-y-4" onSubmit={handleProfileSave}>
+                      <div className="flex items-center gap-3">
+                        <div className="h-12 w-12 overflow-hidden rounded-full border border-graystone-200 bg-aqua-50">
+                          {avatarPreview ? (
+                            <img src={avatarPreview} alt="Avatar preview" className="h-full w-full object-cover" />
+                          ) : (
+                            <span className="flex h-full w-full items-center justify-center text-sm font-semibold text-ocean-700">
+                              {profileInitials}
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          <div className="text-sm font-semibold text-ocean-800">{currentUser || "Your profile"}</div>
+                          <div className="text-[11px] text-graystone-500">{currentUserEmail || 'No email'}</div>
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs text-graystone-600" htmlFor="profile-name">
+                          Display name
+                        </Label>
+                        <Input
+                          id="profile-name"
+                          value={profileFormName}
+                          onChange={(event) => setProfileFormName(event.target.value)}
+                          className="w-full rounded-2xl border border-graystone-200 px-3 py-2 text-sm focus:border-ocean-500 focus:ring-2 focus:ring-aqua-200"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs text-graystone-600">Profile photo</Label>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="cursor-pointer rounded-full border border-graystone-200 px-3 py-1 text-xs font-semibold text-ocean-700 shadow-sm transition hover:border-ocean-300">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={handleAvatarFileChange}
+                            />
+                            Upload photo
+                          </label>
+                          {avatarPreview ? (
+                            <Button type="button" variant="ghost" size="sm" onClick={() => setProfileAvatarDraft("")}>
+                              Remove photo
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                      {profileError ? (
+                        <div className="rounded-2xl bg-rose-50 px-4 py-2 text-xs text-rose-700">{profileError}</div>
+                      ) : null}
+                      {profileStatus ? (
+                        <div className="rounded-2xl bg-emerald-50 px-4 py-2 text-xs text-emerald-700">{profileStatus}</div>
+                      ) : null}
+                      <div className="flex flex-col gap-2">
+                        <Button type="submit" disabled={profileSaving}>
+                          {profileSaving ? "Saving..." : "Save profile"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            setProfileMenuOpen(false);
+                            setChangePasswordOpen(true);
+                          }}
+                        >
+                          Change password
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => {
+                            setProfileMenuOpen(false);
+                            handleSignOut();
+                          }}
+                        >
+                          Sign out
+                        </Button>
+                      </div>
+                    </form>
+                  </div>
+                ) : null}
+              </div>
+            </div>
             {currentView === "menu" && (
               <>
                 <div className="mb-6 flex flex-col gap-4 text-ocean-900 lg:flex-row lg:items-center lg:justify-between">
@@ -7800,12 +8080,6 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                         ) : null}
                       </>
                     )}
-                    <Button
-                      onClick={handleSignOut}
-                      className="heading-font text-sm normal-case"
-                    >
-                      Switch user
-                    </Button>
                     <Button
                       variant="outline"
                       className="heading-font text-sm normal-case"
@@ -8279,7 +8553,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                   onPreviewAssetType={setPendingAssetType}
                   guidelines={guidelines}
                   currentUser={currentUser}
-                  approverOptions={approverList}
+                  approverOptions={approverOptions}
                 />
                   </div>
                   <div className="flex w-full flex-col gap-6">
@@ -8649,7 +8923,11 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                       if (!canUseLinkedIn) return null;
                       return (
                         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                          <LinkedInSubmissionForm onSubmit={addLinkedInSubmission} currentUser={currentUser} />
+                      <LinkedInSubmissionForm
+                        onSubmit={addLinkedInSubmission}
+                        currentUser={currentUser}
+                        approverOptions={approverOptions}
+                      />
                           <LinkedInSubmissionList
                             submissions={linkedinSubmissions}
                             onStatusChange={updateLinkedInStatus}
@@ -8930,38 +9208,26 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                   <CardHeader>
                     <CardTitle className="text-lg text-ocean-900">Approver directory</CardTitle>
                     <p className="mt-2 text-sm text-graystone-500">
-                      Manage the list of approvers that appear in approvals.
+                      Approvers are managed via the user roster. Enable the role on a teammate to list them here.
                     </p>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-2">
-                      {approverList.length ? (
-                        approverList.map((name) => (
-                          <div
+                    {approverOptions.length ? (
+                      <div className="flex flex-wrap gap-2">
+                        {approverOptions.map((name) => (
+                          <span
                             key={name}
-                            className="flex items-center justify-between rounded-xl border border-graystone-200 bg-white px-3 py-2 text-sm text-graystone-700"
+                            className="rounded-full bg-aqua-100 px-3 py-1 text-xs font-semibold text-ocean-700"
                           >
-                            <span>{name}</span>
-                            <Button variant="ghost" size="sm" onClick={() => removeApprover(name)}>
-                              Remove
-                            </Button>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-xs text-graystone-500">No approvers configured yet.</p>
-                      )}
-                    </div>
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                      <Input
-                        placeholder="Add approver name"
-                        value={newApproverName}
-                        onChange={(event) => setNewApproverName(event.target.value)}
-                        className="flex-1"
-                      />
-                      <Button onClick={addApprover} disabled={!newApproverName.trim()}>
-                        Add approver
-                      </Button>
-                    </div>
+                            {name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-graystone-500">
+                        No approvers configured yet. Mark a user as an approver to add them.
+                      </p>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -8988,25 +9254,38 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                         userList.map((user) => (
                           <div
                             key={user.id || user.email || user.name}
-                            className="flex items-center justify-between rounded-xl border border-graystone-200 bg-white px-3 py-2 text-sm text-graystone-700"
+                            className="rounded-xl border border-graystone-200 bg-white px-3 py-3 text-sm text-graystone-700"
                           >
-                            <div>
-                              <div className="font-medium text-graystone-900">{user.name}</div>
-                              <div className="text-[11px] text-graystone-500">
-                                {user.email || 'No email'} · {user.status === 'disabled'
-                                  ? 'Disabled'
-                                  : user.invitePending || user.status === 'pending'
-                                  ? 'Invite pending'
-                                  : 'Active'}
+                            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                              <div>
+                                <div className="font-medium text-graystone-900">{user.name}</div>
+                                <div className="text-[11px] text-graystone-500">
+                                  {user.email || 'No email'} · {user.status === 'disabled'
+                                    ? 'Disabled'
+                                    : user.invitePending || user.status === 'pending'
+                                    ? 'Invite pending'
+                                    : 'Active'}
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-2 text-[10px] font-semibold uppercase text-graystone-500">
+                                  {user.isAdmin ? (
+                                    <span className="rounded-full bg-ocean-50 px-2 py-0.5 text-ocean-700">Admin</span>
+                                  ) : null}
+                                  {user.isApprover ? (
+                                    <span className="rounded-full bg-aqua-50 px-2 py-0.5 text-ocean-700">Approver</span>
+                                  ) : null}
+                                </div>
                               </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Button variant="outline" size="sm" onClick={() => setAccessModalUser(user)}>
-                                Access
-                              </Button>
-                              <Button variant="ghost" size="sm" onClick={() => removeUser(user)}>
-                                Remove
-                              </Button>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Button variant="outline" size="sm" onClick={() => toggleApproverRole(user)}>
+                                  {user.isApprover ? "Remove approver" : "Make approver"}
+                                </Button>
+                                <Button variant="outline" size="sm" onClick={() => setAccessModalUser(user)}>
+                                  Access
+                                </Button>
+                                <Button variant="ghost" size="sm" onClick={() => removeUser(user)}>
+                                  Remove
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         ))
@@ -9062,6 +9341,20 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                         })}
                       </div>
                     </div>
+                    <div className="mt-3 flex items-center gap-2">
+                      <label className="inline-flex items-center gap-2 text-xs font-semibold text-graystone-600">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-graystone-300 text-aqua-500 focus:ring-aqua-300"
+                          checked={newUserIsApprover}
+                          onChange={(event) => setNewUserIsApprover(event.target.checked)}
+                        />
+                        Approver
+                      </label>
+                      <span className="text-[11px] text-graystone-500">
+                        Approvers appear in the approvals picker and receive notifications.
+                      </span>
+                    </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <Button onClick={addUser} disabled={!newUserFirst.trim() || !newUserLast.trim() || !newUserEmail.trim()}>
                         Add user
@@ -9082,7 +9375,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               onUpdate={upsert}
               onNotifyMentions={handleMentionNotifications}
               testingFrameworks={testingFrameworks}
-              approverOptions={approverList}
+              approverOptions={approverOptions}
               users={userList}
             />
             ) : null}

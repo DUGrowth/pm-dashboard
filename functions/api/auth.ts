@@ -40,6 +40,8 @@ const sanitizeUser = (row: any) => ({
   name: row.name,
   status: row.status,
   isAdmin: Boolean(row.isAdmin),
+  isApprover: Boolean(row.isApprover),
+  avatarUrl: row.avatarUrl || null,
   hasPassword: Boolean(row.passwordHash),
   features: (() => {
     try {

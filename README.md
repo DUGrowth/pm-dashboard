@@ -15,6 +15,7 @@ PM Dashboard (dugrowth/pm-dashboard)
   - `notify.ts` → server-side proxy for notifications (Teams webhook; optional email via Brevo/MailChannels)
   - `auth.ts` → password login, invite acceptance, and session management (sets secure cookies)
   - `password.ts` → authenticated users can rotate their password and refresh their session
+  - `approvers.ts` → returns the list of active approvers (no admin rights required)
   - `users.ts` → admin-only user roster + invitation emails
   - `user.ts` → returns the currently authenticated user (backed by the session cookie)
 - `public/js/copyCheckerClient.js` exposes a tiny client you can import as a module.
@@ -49,6 +50,8 @@ Authentication & user management
 - To bootstrap your first admin account, temporarily set `ALLOW_UNAUTHENTICATED=1` (or insert a row directly into `users`) and create an invite for an address listed in `ADMIN_EMAILS`. After accepting the invite, remove the dev override.
 - The worker always ensures a pending owner account (`daniel.davis@populationmatters.org`) exists with admin rights. When that record is missing a password, the worker seeds an invite token (logged to the worker console) so Daniel can activate the account through the invite screen.
 - Signed-in teammates can update their password from the Menu → “Change password” action, which calls `/api/password`, rotates their session cookie, and invalidates older sessions.
+- User records also track optional avatars (`avatarUrl`) and whether they’re approvers (`isApprover`). Teammates can open the profile dropdown to update their display name/photo through `PUT /api/user`.
+- Approvers are managed directly through the roster: admins toggle the role per user, and the `/api/approvers` endpoint exposes the active directory to entry forms and notification flows.
 
 Local Development
 1) Serve `index.html` with any static server (or Cloudflare Pages dev).

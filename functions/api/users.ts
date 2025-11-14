@@ -16,6 +16,8 @@ const serializeUser = (row: any) => ({
   name: row.name,
   status: row.status,
   isAdmin: Boolean(row.isAdmin),
+  isApprover: Boolean(row.isApprover),
+  avatarUrl: row.avatarUrl || null,
   features: (() => {
     try {
       const parsed = JSON.parse(row.features || '[]');
@@ -85,7 +87,7 @@ export const onRequestGet = async ({ request, env }: { request: Request; env: an
   const gate = requireAdmin(auth);
   if (!gate.ok) return gate.response;
   const { results } = await env.DB.prepare(
-    'SELECT id,email,name,status,isAdmin,features,inviteToken,inviteExpiresAt,lastLoginAt,createdAt FROM users ORDER BY createdAt DESC',
+    'SELECT id,email,name,status,isAdmin,isApprover,avatarUrl,features,inviteToken,inviteExpiresAt,lastLoginAt,createdAt FROM users ORDER BY createdAt DESC',
   ).all();
   return ok((results || []).map(serializeUser));
 };
@@ -102,6 +104,7 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: a
   if (!name || !email || !emailRegex.test(email)) return ok({ error: 'Name and valid email required' }, 400);
   const features = ensureArrayOfStrings(body.features);
   const isAdmin = Boolean(body.isAdmin);
+  const isApprover = Boolean(body.isApprover);
   const existing = await env.DB.prepare('SELECT * FROM users WHERE email=?').bind(email).first();
   const token = generateToken(32);
   const expiresAt = new Date(Date.now() + inviteTtlMs(env)).toISOString();
@@ -109,9 +112,9 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: a
   if (existing) {
     if (existing.status !== 'disabled') return ok({ error: 'User already exists' }, 409);
     await env.DB.prepare(
-      'UPDATE users SET name=?, features=?, status=?, isAdmin=?, inviteToken=?, inviteExpiresAt=?, updatedAt=? WHERE id=?',
+      'UPDATE users SET name=?, features=?, status=?, isAdmin=?, isApprover=?, inviteToken=?, inviteExpiresAt=?, updatedAt=? WHERE id=?',
     )
-      .bind(name, JSON.stringify(features), 'pending', isAdmin ? 1 : 0, token, expiresAt, now, existing.id)
+      .bind(name, JSON.stringify(features), 'pending', isAdmin ? 1 : 0, isApprover ? 1 : 0, token, expiresAt, now, existing.id)
       .run();
     await sendInvite({ request, env, email, name, token });
     const row = await env.DB.prepare('SELECT * FROM users WHERE id=?').bind(existing.id).first();
@@ -119,9 +122,9 @@ export const onRequestPost = async ({ request, env }: { request: Request; env: a
   }
   const id = randomId('usr_');
   await env.DB.prepare(
-    'INSERT INTO users (id,email,name,features,status,isAdmin,inviteToken,inviteExpiresAt,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    'INSERT INTO users (id,email,name,features,status,isAdmin,isApprover,inviteToken,inviteExpiresAt,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
   )
-    .bind(id, email, name, JSON.stringify(features), 'pending', isAdmin ? 1 : 0, token, expiresAt, now, now)
+    .bind(id, email, name, JSON.stringify(features), 'pending', isAdmin ? 1 : 0, isApprover ? 1 : 0, token, expiresAt, now, now)
     .run();
   await sendInvite({ request, env, email, name, token });
   const row = await env.DB.prepare('SELECT * FROM users WHERE id=?').bind(id).first();
@@ -153,6 +156,10 @@ export const onRequestPut = async ({ request, env }: { request: Request; env: an
   if (typeof body.isAdmin === 'boolean') {
     updates.push('isAdmin=?');
     binds.push(body.isAdmin ? 1 : 0);
+  }
+  if (typeof body.isApprover === 'boolean') {
+    updates.push('isApprover=?');
+    binds.push(body.isApprover ? 1 : 0);
   }
   if (typeof body.status === 'string') {
     const normalizedStatus = ['pending', 'active', 'disabled'].includes(body.status) ? body.status : null;

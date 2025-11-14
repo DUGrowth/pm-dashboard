@@ -19,6 +19,8 @@ const USER_ALTERS = [
   "ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'pending'",
   'ALTER TABLE users ADD COLUMN isAdmin INTEGER DEFAULT 0',
   'ALTER TABLE users ADD COLUMN lastLoginAt TEXT',
+  'ALTER TABLE users ADD COLUMN isApprover INTEGER DEFAULT 0',
+  'ALTER TABLE users ADD COLUMN avatarUrl TEXT',
 ];
 
 async function ensureSchema(env: any) {
@@ -33,6 +35,8 @@ async function ensureSchema(env: any) {
       features TEXT,
       status TEXT DEFAULT 'pending',
       isAdmin INTEGER DEFAULT 0,
+      isApprover INTEGER DEFAULT 0,
+      avatarUrl TEXT,
       createdAt TEXT,
       updatedAt TEXT,
       lastLoginAt TEXT
@@ -77,9 +81,9 @@ export async function ensureDefaultOwner(env: any) {
       const id = randomId('usr_');
       const inviteToken = generateToken(32);
       await env.DB.prepare(
-        'INSERT INTO users (id,email,name,status,isAdmin,features,inviteToken,inviteExpiresAt,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO users (id,email,name,status,isAdmin,isApprover,features,inviteToken,inviteExpiresAt,createdAt,updatedAt,avatarUrl) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
       )
-        .bind(id, normalizedEmail, DEFAULT_OWNER_NAME, 'pending', 1, featuresJson, inviteToken, null, now, now)
+        .bind(id, normalizedEmail, DEFAULT_OWNER_NAME, 'pending', 1, 1, featuresJson, inviteToken, null, now, now, null)
         .run();
       logInviteToken(inviteToken);
       return;
@@ -96,6 +100,10 @@ export async function ensureDefaultOwner(env: any) {
     }
     if (!existing.isAdmin) {
       updates.push('isAdmin=?');
+      bindings.push(1);
+    }
+    if (!existing.isApprover) {
+      updates.push('isApprover=?');
       bindings.push(1);
     }
     if (existing.status === 'disabled') {
