@@ -19,6 +19,33 @@ const UPSERT_COLUMNS =
 export async function ensureDefaultOwner(env: any) {
   try {
     if (!env?.DB) return;
+    await env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        passwordHash TEXT,
+        inviteToken TEXT,
+        inviteExpiresAt TEXT,
+        features TEXT,
+        status TEXT DEFAULT 'pending',
+        isAdmin INTEGER DEFAULT 0,
+        createdAt TEXT,
+        updatedAt TEXT,
+        lastLoginAt TEXT
+      )`,
+    ).run();
+    await env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL,
+        tokenHash TEXT NOT NULL,
+        createdAt TEXT,
+        expiresAt TEXT,
+        userAgent TEXT,
+        ip TEXT
+      )`,
+    ).run();
     const normalizedEmail = DEFAULT_OWNER_EMAIL.toLowerCase();
     const existing = await env.DB.prepare('SELECT * FROM users WHERE email=?').bind(normalizedEmail).first();
     if (existing && existing.passwordHash) return;
