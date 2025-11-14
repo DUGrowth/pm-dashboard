@@ -1,5 +1,4 @@
 import { hashToken, randomId } from '../lib/crypto';
-import { ensureDefaultOwner } from '../lib/bootstrap';
 
 const EMAIL_HEADERS = [
   'cf-access-verified-email',
@@ -126,7 +125,6 @@ type AuthSuccess = {
 type AuthFailure = { ok: false; status: number; error: string };
 
 export async function authorizeRequest(request: Request, env: any): Promise<AuthSuccess | AuthFailure> {
-  await ensureDefaultOwner(env);
   if (env.ALLOW_UNAUTHENTICATED === '1' || env.ACCESS_ALLOW_UNAUTHENTICATED === '1') {
     const email = env.DEV_AUTH_EMAIL || 'dev@example.com';
     const name = env.DEV_AUTH_NAME || 'Dev User';

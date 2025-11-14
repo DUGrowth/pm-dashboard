@@ -13,24 +13,45 @@ const DEFAULT_OWNER_FEATURES = [
   'admin',
 ];
 
+const UPSERT_COLUMNS =
+  'name=?, passwordHash=?, status=?, isAdmin=1, features=?, inviteToken=NULL, inviteExpiresAt=NULL, updatedAt=?';
+
 export async function ensureDefaultOwner(env: any) {
-  if (!env?.DB) return;
-  const normalizedEmail = DEFAULT_OWNER_EMAIL.toLowerCase();
-  const existing = await env.DB.prepare('SELECT * FROM users WHERE email=?').bind(normalizedEmail).first();
-  const now = new Date().toISOString();
-  const featuresJson = JSON.stringify(DEFAULT_OWNER_FEATURES);
-  const hashed = await hashPassword(DEFAULT_OWNER_PASSWORD);
-  if (existing) {
-    await env.DB.prepare(
-      'UPDATE users SET name=?, passwordHash=?, status=?, isAdmin=1, features=?, inviteToken=NULL, inviteExpiresAt=NULL, updatedAt=? WHERE id=?',
-    )
-      .bind(DEFAULT_OWNER_NAME, hashed, 'active', featuresJson, now, existing.id)
-      .run();
-    return;
+  try {
+    if (!env?.DB) return;
+    const normalizedEmail = DEFAULT_OWNER_EMAIL.toLowerCase();
+    const existing = await env.DB.prepare('SELECT * FROM users WHERE email=?').bind(normalizedEmail).first();
+    if (existing && existing.passwordHash) return;
+    const now = new Date().toISOString();
+    const featuresJson = JSON.stringify(DEFAULT_OWNER_FEATURES);
+    const hashed = await hashPassword(DEFAULT_OWNER_PASSWORD);
+    if (existing) {
+      try {
+        await env.DB.prepare(`UPDATE users SET ${UPSERT_COLUMNS} WHERE id=?`)
+          .bind(DEFAULT_OWNER_NAME, hashed, 'active', featuresJson, now, existing.id)
+          .run();
+      } catch {
+        await env.DB.prepare('UPDATE users SET name=?, passwordHash=?, status=?, isAdmin=1, features=?, updatedAt=? WHERE id=?')
+          .bind(DEFAULT_OWNER_NAME, hashed, 'active', featuresJson, now, existing.id)
+          .run();
+      }
+      return;
+    }
+    const id = randomId('usr_');
+    try {
+      await env.DB.prepare(
+        'INSERT INTO users (id,email,name,passwordHash,status,isAdmin,features,createdAt,updatedAt,lastLoginAt,inviteToken,inviteExpiresAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      )
+        .bind(id, normalizedEmail, DEFAULT_OWNER_NAME, hashed, 'active', 1, featuresJson, now, now, null, null, null)
+        .run();
+    } catch {
+      await env.DB.prepare(
+        'INSERT INTO users (id,email,name,passwordHash,status,isAdmin,features,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?)',
+      )
+        .bind(id, normalizedEmail, DEFAULT_OWNER_NAME, hashed, 'active', 1, featuresJson, now, now)
+        .run();
+    }
+  } catch (error) {
+    console.warn('Default owner bootstrap failed', error);
   }
-  await env.DB.prepare(
-    'INSERT INTO users (id,email,name,passwordHash,status,isAdmin,features,createdAt,updatedAt,lastLoginAt) VALUES (?,?,?,?,?,?,?,?,?,?)',
-  )
-    .bind(randomId('usr_'), normalizedEmail, DEFAULT_OWNER_NAME, hashed, 'active', 1, featuresJson, now, now, null)
-    .run();
 }

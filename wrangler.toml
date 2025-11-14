@@ -7,4 +7,4 @@ OPENAI_MODEL = "gpt-4o-mini"
 [[d1_databases]]
 binding = "DB"
 database_name = "contentdb"
-database_id = "REPLACE_WITH_CONTENTDB_ID"
+database_id = "d4ebd9b4-686d-4dc8-8588-984e2d6095d0"
