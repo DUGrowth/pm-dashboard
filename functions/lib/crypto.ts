@@ -25,7 +25,9 @@ export const randomId = (prefix = '') => `${prefix}${crypto.randomUUID?.() ?? he
 
 export const generateToken = (size = 32) => hex(crypto.getRandomValues(new Uint8Array(size)));
 
-const PBKDF2_ITERATIONS = 150000;
+// Workers' WebCrypto caps PBKDF2 iterations at 100k. Using 100k keeps compatibility
+// with previously issued hashes because the stored string records the iteration count.
+const PBKDF2_ITERATIONS = 100000;
 const PBKDF2_HASH = 'SHA-256';
 
 export async function hashPassword(password: string): Promise<string> {
