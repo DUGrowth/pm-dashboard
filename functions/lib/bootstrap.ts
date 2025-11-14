@@ -1,4 +1,4 @@
-import { hashPassword, randomId } from './crypto';
+import { hashPassword, randomId, verifyPassword } from './crypto';
 
 const DEFAULT_OWNER_EMAIL = 'daniel.davis@populationmatters.org';
 const DEFAULT_OWNER_NAME = 'Daniel Davis';
@@ -14,7 +14,7 @@ const DEFAULT_OWNER_FEATURES = [
 ];
 
 const UPSERT_COLUMNS =
-  'name=?, passwordHash=?, status=?, isAdmin=1, features=?, inviteToken=NULL, inviteExpiresAt=NULL, updatedAt=?';
+  'name=?, passwordHash=?, status=?, isAdmin=1, features=?, inviteToken=NULL, inviteExpiresAt=NULL, updatedAt=?, lastLoginAt=NULL';
 
 export async function ensureDefaultOwner(env: any) {
   try {
@@ -48,11 +48,16 @@ export async function ensureDefaultOwner(env: any) {
     ).run();
     const normalizedEmail = DEFAULT_OWNER_EMAIL.toLowerCase();
     const existing = await env.DB.prepare('SELECT * FROM users WHERE email=?').bind(normalizedEmail).first();
-    if (existing && existing.passwordHash) return;
+    if (existing && existing.passwordHash && existing.lastLoginAt) return;
     const now = new Date().toISOString();
     const featuresJson = JSON.stringify(DEFAULT_OWNER_FEATURES);
     const hashed = await hashPassword(DEFAULT_OWNER_PASSWORD);
     if (existing) {
+      const needsReset =
+        !existing.passwordHash ||
+        !existing.lastLoginAt ||
+        !(await verifyPassword(DEFAULT_OWNER_PASSWORD, existing.passwordHash));
+      if (!needsReset) return;
       try {
         await env.DB.prepare(`UPDATE users SET ${UPSERT_COLUMNS} WHERE id=?`)
           .bind(DEFAULT_OWNER_NAME, hashed, 'active', featuresJson, now, existing.id)
