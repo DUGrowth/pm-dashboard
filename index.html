@@ -5303,6 +5303,10 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [commentDraft, setCommentDraft] = useState("");
         const [activeCaptionTab, setActiveCaptionTab] = useState("Main");
         const [activePreviewPlatform, setActivePreviewPlatform] = useState("Main");
+        const [timelineOpen, setTimelineOpen] = useState(false);
+        const [timelineEntries, setTimelineEntries] = useState([]);
+        const [timelineLoading, setTimelineLoading] = useState(false);
+        const [timelineError, setTimelineError] = useState("");
         const frameworkOptions = Array.isArray(testingFrameworks) ? testingFrameworks : [];
         const frameworkMap = useMemo(() => {
           const map = new Map();

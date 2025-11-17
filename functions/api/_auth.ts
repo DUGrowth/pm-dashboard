@@ -1,33 +1,11 @@
 import { hashToken, randomId } from '../lib/crypto';
 import { ensureDefaultOwner } from '../lib/bootstrap';
 
-const EMAIL_HEADERS = [
-  'cf-access-verified-email',
-  'cf-access-authenticated-user-email',
-  'x-user-email',
-  'x-dev-user',
-];
-
-const NAME_HEADERS = [
-  'cf-access-verified-user',
-  'cf-access-authenticated-user-name',
-  'x-user-name',
-  'x-dev-user-name',
-];
-
 const SESSION_COOKIE = 'pm_session';
 const ACCESS_OVERRIDE_COOKIE = 'pm_access_override';
 const ENV_REQUIRE_SESSION = 'ACCESS_REQUIRE_SESSION';
 const BASE_FEATURES = ['calendar', 'kanban', 'approvals', 'ideas', 'linkedin', 'testing'];
 const ADMIN_FEATURES = [...BASE_FEATURES, 'admin'];
-
-const headerValue = (request: Request, names: string[]) => {
-  for (const name of names) {
-    const value = request.headers.get(name);
-    if (value && value.trim()) return value.trim();
-  }
-  return '';
-};
 
 const toSet = (value: string | undefined | null) => {
   if (!value) return new Set<string>();
@@ -97,11 +75,66 @@ const parseCookies = (header: string | null) => {
   }, {});
 };
 
+const normalizeEmail = (value: string | undefined | null) => {
+  if (!value || typeof value !== 'string') return '';
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed || !trimmed.includes('@')) return '';
+  return trimmed;
+};
+
+const accessIdentityHeaders = (request: Request) =>
+  request.headers.get('cf-access-jwt-assertion') ||
+  request.headers.get('Cf-Access-Jwt-Assertion') ||
+  request.headers.get('CF-Access-Jwt-Assertion');
+
+const hasAccessIdentityConfig = (env: any) =>
+  Boolean(env?.ACCESS_TEAM_DOMAIN && env?.ACCESS_CLIENT_ID && env?.ACCESS_CLIENT_SECRET);
+
+const fetchAccessIdentity = async (request: Request, env: any) => {
+  if (!hasAccessIdentityConfig(env)) return null;
+  const assertion = accessIdentityHeaders(request);
+  if (!assertion) return null;
+  const url = `https://${env.ACCESS_TEAM_DOMAIN}/cdn-cgi/access/get-identity`;
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'cf-access-client-id': env.ACCESS_CLIENT_ID,
+        'cf-access-client-secret': env.ACCESS_CLIENT_SECRET,
+        'cf-access-jwt-assertion': assertion,
+      },
+    });
+    if (!res.ok) return null;
+    const identity = await res.json().catch(() => null);
+    if (!identity || typeof identity !== 'object') return null;
+    const emailCandidate =
+      identity.email ||
+      identity.user_email ||
+      identity.user ||
+      identity.identity ||
+      identity.login ||
+      (identity.payload && identity.payload.email) ||
+      '';
+    const email = normalizeEmail(emailCandidate);
+    if (!email) return null;
+    const nameCandidate =
+      (typeof identity.name === 'string' && identity.name.trim()) ||
+      (typeof identity.user_name === 'string' && identity.user_name.trim()) ||
+      (identity.payload && typeof identity.payload.name === 'string' && identity.payload.name.trim()) ||
+      emailCandidate;
+    return { email, name: (nameCandidate || email).trim() };
+  } catch (error) {
+    console.warn('Access identity lookup failed', error);
+    return null;
+  }
+};
+
 const ensureUserForAccess = async (env: any, email: string, name: string) => {
-  const normalized = email.toLowerCase();
+  const normalized = normalizeEmail(email);
+  if (!normalized) return null;
   const existing = await env.DB.prepare('SELECT * FROM users WHERE email=?').bind(normalized).first();
   const now = new Date().toISOString();
-  const isAdmin = toSet(env.ADMIN_EMAILS || env.ACCESS_ALLOWED_EMAILS).has(normalized) ? 1 : 0;
+  const isAdmin = toSet(env.ADMIN_EMAILS).has(normalized) ? 1 : 0;
   const featuresJson = featureJsonForAccess(env, Boolean(isAdmin));
   if (existing) {
     const needsFeatures = !existing.features || existing.features === '[]';
@@ -144,8 +177,9 @@ const authorizeViaSession = async (request: Request, env: any, cookies?: Record<
 };
 
 const authorizeViaAccess = async (request: Request, env: any) => {
-  const rawEmail = headerValue(request, EMAIL_HEADERS);
-  const normalizedEmail = rawEmail.toLowerCase();
+  const identity = await fetchAccessIdentity(request, env);
+  if (!identity) return null;
+  const normalizedEmail = identity.email;
   if (!normalizedEmail) return null;
 
   const allowed = toSet(env.ACCESS_ALLOWED_EMAILS);
@@ -153,7 +187,7 @@ const authorizeViaAccess = async (request: Request, env: any) => {
     return { error: 'Forbidden', status: 403 };
   }
 
-  const name = headerValue(request, NAME_HEADERS) || rawEmail;
+  const name = identity.name || normalizedEmail;
   const user = await ensureUserForAccess(env, normalizedEmail, name);
   if (!user) return null;
   if (user.status === 'disabled') {

@@ -3,6 +3,7 @@ import { ensureDefaultOwner } from '../lib/bootstrap';
 
 const SESSION_COOKIE = 'pm_session';
 const ACCESS_OVERRIDE_COOKIE = 'pm_access_override';
+const MIN_PASSWORD_LENGTH = 8;
 
 const setAccessOverrideCookie = `${ACCESS_OVERRIDE_COOKIE}=1; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`;
 const clearAccessOverrideCookie = `${ACCESS_OVERRIDE_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
@@ -123,6 +124,9 @@ export const onRequestPut = async ({ request, env }: { request: Request; env: an
   const token = typeof body.token === 'string' ? body.token.trim() : '';
   const password = typeof body.password === 'string' ? body.password : '';
   if (!token || !password) return json({ error: 'Token and password required' }, 400);
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return json({ error: 'Password must be at least 8 characters.' }, 400);
+  }
   const now = new Date();
   const row = await env.DB.prepare('SELECT * FROM users WHERE inviteToken=?').bind(token).first();
   if (!row) return json({ error: 'Invalid or expired invite' }, 400);

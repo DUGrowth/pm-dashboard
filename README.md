@@ -33,7 +33,8 @@ Environment
   - The dashboard now relies on worker-managed sessions (secure HttpOnly cookie set by `/api/auth`). Users sign in with email + password, and admins can send invitations from the Admin tools UI.
   - Invites expire after `INVITE_TTL_HOURS` (default 168); logins keep a session alive for `SESSION_TTL_SECONDS` (default 7 days).
   - `ADMIN_EMAILS` can seed a comma-separated list of addresses that should be treated as administrators.
-  - Cloudflare Access headers are still honoured as an optional fallback (`ACCESS_ALLOWED_EMAILS`) while you transition, but they are no longer required.
+  - Cloudflare Access can still act as an SSO fallback, but it now requires a service token so `_auth` can validate the `Cf-Access-Jwt-Assertion`. Set `ACCESS_TEAM_DOMAIN`, `ACCESS_CLIENT_ID`, and `ACCESS_CLIENT_SECRET` to the values from your Cloudflare Access service token to enable this path.
+  - `ACCESS_ALLOWED_EMAILS` limits who can use that Access fallback; it no longer promotes those accounts to admins. Use `ADMIN_EMAILS` (or the in-app roster) for elevated rights.
   - For local development without SSO, set `ALLOW_UNAUTHENTICATED=1` and optionally `DEV_AUTH_EMAIL` / `DEV_AUTH_NAME` for the synthetic user.
   - The Teams webhook proxy restricts outbound requests to `*.office.com` / `*.office365.com` hosts by default; extend/override the allow list with `TEAMS_WEBHOOK_ALLOW_LIST` if needed.
 - Notifications:
@@ -46,6 +47,7 @@ Authentication & user management
 - The `/api/users` endpoint (surfaced via the “Admin tools → User roster” UI) stores users centrally in D1 and emails invitations that link to `?invite=...`. Invited teammates land on a password setup screen, and all logins go through `/api/auth` (POST = login, PUT = accept invite, DELETE = logout).
 - Passwords are hashed with PBKDF2+SHA256; sessions are stored hashed in the `sessions` table and issued as secure, HttpOnly cookies. `SESSION_TTL_SECONDS` controls how long a cookie stays valid (default 7 days). `INVITE_TTL_HOURS` controls how long invite links remain active (default 168 hours / 7 days).
 - Configure `MAIL_FROM` / `MAIL_FROM_NAME` (and optionally Brevo credentials) so the worker can send the invitation emails directly. `ADMIN_EMAILS` seeds which accounts should have full admin rights after they accept their invite.
+- Invite acceptance enforces the same minimum password length (8 characters) as the in-app password changer, so weak credentials can’t be created by bypassing the UI.
 - Cloudflare Access headers are still understood, so you can keep Zero Trust enabled while migrating. Once confident in the new flow, remove the Access policy so teammates can use the built-in password login from any device.
 - To bootstrap your first admin account, temporarily set `ALLOW_UNAUTHENTICATED=1` (or insert a row directly into `users`) and create an invite for an address listed in `ADMIN_EMAILS`. After accepting the invite, remove the dev override.
 - The worker always ensures a pending owner account (`daniel.davis@populationmatters.org`) exists with admin rights. When that record is missing a password, the worker seeds an invite token (logged to the worker console) so Daniel can activate the account through the invite screen.
