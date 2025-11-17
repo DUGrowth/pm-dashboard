@@ -1124,10 +1124,10 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         }
       };
 
-      const resolveMentionCandidate = (candidate, names) => {
-        if (!candidate) return null;
-        const trimmed = candidate.trim();
-        if (!trimmed) return null;
+const resolveMentionCandidate = (candidate, names) => {
+  if (!candidate) return null;
+  const trimmed = candidate.trim();
+  if (!trimmed) return null;
         const lower = trimmed.toLowerCase();
         const condensed = lower.replace(/\s+/g, "");
         for (const name of names) {
@@ -1140,9 +1140,52 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           if (lowerName.startsWith(lower)) return clean;
           const parts = clean.split(/\s+/).map((part) => part.toLowerCase());
           if (parts.includes(lower)) return clean;
-        }
-        return null;
-      };
+  }
+  return null;
+};
+
+const computeMentionState = (value, cursor, names) => {
+  if (!names || !names.length) return null;
+  if (typeof cursor !== "number") return null;
+  const uptoCursor = value.slice(0, cursor);
+  const match = uptoCursor.match(/@([^\s@]*)$/);
+  if (!match) return null;
+  const query = match[1];
+  const start = cursor - query.length - 1;
+  if (start < 0) return null;
+  const lowered = query.toLowerCase();
+  const suggestions = names
+    .filter((name) => {
+      if (!name) return false;
+      const normalized = name.toLowerCase();
+      if (!lowered) return true;
+      return normalized.includes(lowered);
+    })
+    .slice(0, 6);
+  if (!suggestions.length) return null;
+  return { query, start, end: cursor, suggestions };
+};
+
+const MentionSuggestionList = ({ suggestions, onSelect }) => {
+  if (!suggestions || !suggestions.length) return null;
+  return (
+    <div className="mt-1 max-h-48 overflow-y-auto rounded-xl border border-graystone-200 bg-white shadow-lg">
+      {suggestions.map((name) => (
+        <button
+          type="button"
+          key={name}
+          className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-graystone-700 hover:bg-aqua-50"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            onSelect?.(name);
+          }}
+        >
+          <span>@{name}</span>
+        </button>
+      ))}
+    </div>
+  );
+};
 
       const monthKeyFromDate = (iso) => {
         if (!iso) return "";
@@ -4859,8 +4902,31 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         );
       }
 
-      function EntryPreviewModal({ open, entry, onClose, onEdit, currentUser = "", currentUserEmail = "" }) {
+      function EntryPreviewModal({
+        open,
+        entry,
+        onClose,
+        onEdit,
+        currentUser = "",
+        currentUserEmail = "",
+        reviewMode = false,
+        canApprove = false,
+        onApprove,
+        onUpdate,
+        onNotifyMentions,
+        onCommentAdded,
+        approverOptions = [],
+        users = [],
+      }) {
         const sanitized = useMemo(() => (entry ? sanitizeEntry(entry) : null), [entry]);
+        const [commentDraft, setCommentDraft] = useState("");
+        const [mentionState, setMentionState] = useState(null);
+        useEffect(() => {
+          if (!open) {
+            setCommentDraft("");
+            setMentionState(null);
+          }
+        }, [open, entry?.id]);
         if (!open || !sanitized) return null;
         const plannedPlatforms = sanitized.platforms.length ? sanitized.platforms : ["Main"];
         const defaultPreviewPlatformCandidate =
@@ -4881,6 +4947,87 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const normalizedCurrent = (currentUser || currentUserEmail || "").trim().toLowerCase();
         const normalizedAuthor = (sanitized.author || "").trim().toLowerCase();
         const canEdit = normalizedAuthor && normalizedCurrent && normalizedAuthor === normalizedCurrent;
+        const mentionDirectory = useMemo(() => {
+          if (!sanitized) return [];
+          const normalizedUserNames = Array.isArray(users)
+            ? users
+                .map((user) => {
+                  if (!user) return "";
+                  if (typeof user === "string") return user;
+                  if (user.name && String(user.name).trim().length) return String(user.name).trim();
+                  if (user.email && String(user.email).trim().length) return String(user.email).trim();
+                  return "";
+                })
+                .filter(Boolean)
+            : [];
+          return Array.from(
+            new Set([
+              ...approverOptions,
+              ...normalizedUserNames,
+              ...(sanitized.approvers || []),
+              sanitized.author || "",
+            ])
+          ).filter(Boolean);
+        }, [approverOptions, users, sanitized]);
+        const handleCommentChange = (event) => {
+          const { value, selectionStart } = event.target;
+          setCommentDraft(value);
+          const nextState = computeMentionState(value, selectionStart, mentionDirectory);
+          setMentionState(nextState);
+        };
+        const handleMentionSelect = (name) => {
+          if (!mentionState || mentionState.start == null || mentionState.end == null) return;
+          const before = commentDraft.slice(0, mentionState.start);
+          const after = commentDraft.slice(mentionState.end);
+          const needsSpace = after && !after.startsWith(" ") ? " " : "";
+          const nextValue = `${before}@${name}${needsSpace}${after}`;
+          setCommentDraft(nextValue);
+          setMentionState(null);
+        };
+        const handleCommentSubmit = (event) => {
+          event.preventDefault();
+          if (!sanitized || !onUpdate) return;
+          const body = commentDraft.trim();
+          if (!body) return;
+          const rawMentions = extractMentions(body);
+          let finalBody = body;
+          const resolvedHandles = new Set();
+          const mentionNames = new Set();
+          rawMentions.forEach((raw) => {
+            const candidate = raw.replace(/^@/, "").trim();
+            const match = resolveMentionCandidate(candidate, mentionDirectory);
+            if (match) {
+              const canonical = `@${match}`;
+              resolvedHandles.add(canonical);
+              mentionNames.add(match);
+              finalBody = finalBody.replace(raw, canonical);
+            }
+          });
+          const comment = {
+            id: uuid(),
+            author: currentUser || "Unknown",
+            body: finalBody,
+            createdAt: new Date().toISOString(),
+            mentions: Array.from(resolvedHandles),
+          };
+          const next = sanitizeEntry({
+            ...sanitized,
+            comments: [...ensureComments(sanitized.comments), comment],
+          });
+          onUpdate(next);
+          setCommentDraft("");
+          setMentionState(null);
+          if (mentionNames.size && onNotifyMentions) {
+            onNotifyMentions({ entry: next, comment, mentionNames: Array.from(mentionNames) });
+          }
+          if (onCommentAdded) {
+            onCommentAdded({ entry: next, comment });
+          }
+        };
+        const mentionSuggestions = mentionState?.suggestions || [];
+        const reviewEnabled = Boolean(reviewMode);
+        const allowApproveAction = reviewEnabled && canApprove;
+        const allowCommenting = reviewEnabled && canApprove && Boolean(onUpdate);
         const platformIcons = Array.from(
           new Set(
             plannedPlatforms
@@ -4942,16 +5089,44 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                     );
                   })}
                 </div>
-              </div>
-              <div className="flex items-center justify-end gap-3 border-t border-graystone-200 bg-graystone-50 px-6 py-4">
-                <Button variant="ghost" onClick={onClose}>
-                  Close
-                </Button>
-                {canEdit ? (
-                  <Button onClick={() => onEdit?.(sanitized.id)}>
-                    Edit entry
-                  </Button>
+                {allowCommenting ? (
+                  <div className="space-y-2 rounded-3xl border border-aqua-200 bg-white p-4 shadow-sm">
+                    <div className="text-sm font-semibold text-ocean-800">Leave a comment</div>
+                    <form onSubmit={handleCommentSubmit} className="space-y-2">
+                      <Textarea
+                        value={commentDraft}
+                        onChange={handleCommentChange}
+                        rows={3}
+                        placeholder="Share feedback or @mention an approver"
+                      />
+                      <MentionSuggestionList suggestions={mentionSuggestions} onSelect={handleMentionSelect} />
+                      <div className="flex items-center justify-end">
+                        <Button type="submit" disabled={!commentDraft.trim()}>
+                          Add comment
+                        </Button>
+                      </div>
+                    </form>
+                  </div>
                 ) : null}
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-graystone-200 bg-graystone-50 px-6 py-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  {allowApproveAction ? (
+                    <Button variant="outline" onClick={() => onApprove?.(sanitized.id)}>
+                      {sanitized.status === "Approved" ? "Mark as pending" : "Mark as approved"}
+                    </Button>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button variant="ghost" onClick={onClose}>
+                    Close
+                  </Button>
+                  {canEdit ? (
+                    <Button onClick={() => onEdit?.(sanitized.id)}>
+                      Edit entry
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </div>
           </Modal>
@@ -5301,6 +5476,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           sanitizedEntry ? sanitizedEntry.platforms.length === ALL_PLATFORMS.length : false
         );
         const [commentDraft, setCommentDraft] = useState("");
+        const [mentionState, setMentionState] = useState(null);
         const [activeCaptionTab, setActiveCaptionTab] = useState("Main");
         const [activePreviewPlatform, setActivePreviewPlatform] = useState("Main");
         const [timelineOpen, setTimelineOpen] = useState(false);
@@ -5328,6 +5504,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           setDraft(sanitizedEntry);
           setAllPlatforms(sanitizedEntry.platforms.length === ALL_PLATFORMS.length);
           setCommentDraft("");
+          setMentionState(null);
         }, [sanitizedEntry]);
 
         const draftPlatforms = Array.isArray(draft?.platforms) ? draft.platforms : [];
@@ -5523,29 +5700,27 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           });
         };
 
+        const handleCommentChange = (event) => {
+          const { value, selectionStart } = event.target;
+          setCommentDraft(value);
+          const nextState = computeMentionState(value, selectionStart, mentionDirectory);
+          setMentionState(nextState);
+        };
+
+        const handleMentionSelect = (name) => {
+          if (!mentionState || mentionState.start == null || mentionState.end == null) return;
+          const before = commentDraft.slice(0, mentionState.start);
+          const after = commentDraft.slice(mentionState.end);
+          const needsSpace = after && !after.startsWith(" ") ? " " : "";
+          const nextValue = `${before}@${name}${needsSpace}${after}`;
+          setCommentDraft(nextValue);
+          setMentionState(null);
+        };
+
         const handleCommentSubmit = (event) => {
           event.preventDefault();
           const body = commentDraft.trim();
           if (!body) return;
-
-          const normalizedUserNames = Array.isArray(users)
-            ? users
-                .map((user) => (typeof user === "string" ? user : user?.name || ""))
-                .filter(Boolean)
-            : [];
-          const mentionDirectory = Array.from(
-            new Set(
-              [
-                ...approverOptions,
-                ...normalizedUserNames,
-                ...(draft.approvers || []),
-                draft.author,
-              ]
-                .filter(Boolean)
-                .map((name) => String(name).trim())
-                .filter(Boolean)
-            )
-          );
 
           const rawMentions = extractMentions(body);
           let finalBody = body;
@@ -5577,6 +5752,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           });
           setDraft(next);
           setCommentDraft("");
+          setMentionState(null);
           if (onUpdate) onUpdate(next);
           if (onNotifyMentions && mentionNames.size) {
             onNotifyMentions({
@@ -5831,10 +6007,11 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             <form onSubmit={handleCommentSubmit} className="space-y-2">
               <Textarea
                 value={commentDraft}
-                onChange={(event) => setCommentDraft(event.target.value)}
+                onChange={handleCommentChange}
                 rows={3}
                 placeholder="Share feedback or mention someone with @"
               />
+              <MentionSuggestionList suggestions={mentionSuggestions} onSelect={handleMentionSelect} />
               <div className="flex items-center justify-end">
                 <Button type="submit" disabled={!commentDraft.trim()}>
                   Add comment
@@ -5847,6 +6024,28 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const canApproveAction = isApproverView && draft.status !== "Approved";
         const canEdit = isAuthorView;
         const timelineList = Array.isArray(timelineEntries) ? timelineEntries : [];
+        const mentionDirectory = useMemo(() => {
+          const normalizedUserNames = Array.isArray(users)
+            ? users
+                .map((user) => {
+                  if (!user) return "";
+                  if (typeof user === "string") return user;
+                  if (user.name && String(user.name).trim().length) return String(user.name).trim();
+                  if (user.email && String(user.email).trim().length) return String(user.email).trim();
+                  return "";
+                })
+                .filter(Boolean)
+            : [];
+          return Array.from(
+            new Set([
+              ...approverOptions,
+              ...normalizedUserNames,
+              ...(draft?.approvers || []),
+              draft?.author || "",
+            ])
+          ).filter(Boolean);
+        }, [approverOptions, users, draft]);
+        const mentionSuggestions = mentionState?.suggestions || [];
 
         return (
           <>
@@ -6423,6 +6622,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [performanceImportOpen, setPerformanceImportOpen] = useState(false);
         const [approvalsModalOpen, setApprovalsModalOpen] = useState(false);
         const [previewEntryId, setPreviewEntryId] = useState("");
+        const [previewEntryContext, setPreviewEntryContext] = useState("default");
         const [menuMotionActive, setMenuMotionActive] = useState(false);
         const [changePasswordOpen, setChangePasswordOpen] = useState(false);
         const [pendingAssetType, setPendingAssetType] = useState(null);
@@ -6459,6 +6659,37 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             return '';
           }
         });
+        const normalizedViewerName = useMemo(() => (currentUser || "").trim().toLowerCase(), [currentUser]);
+        const normalizedViewerEmail = useMemo(
+          () => (currentUserEmail || "").trim().toLowerCase(),
+          [currentUserEmail]
+        );
+        const viewerMatchesValue = useCallback(
+          (value) => {
+            if (!value || typeof value !== "string") return false;
+            const normalized = value.trim().toLowerCase();
+            if (!normalized) return false;
+            if (normalizedViewerName && normalizedViewerName === normalized) return true;
+            if (normalizedViewerEmail && normalizedViewerEmail === normalized) return true;
+            return false;
+          },
+          [normalizedViewerName, normalizedViewerEmail]
+        );
+        const viewerIsAuthor = useCallback(
+          (entry) => {
+            if (!entry) return false;
+            return viewerMatchesValue(entry.author);
+          },
+          [viewerMatchesValue]
+        );
+        const viewerIsApprover = useCallback(
+          (entry) => {
+            if (!entry) return false;
+            const names = ensurePeopleArray(entry.approvers);
+            return names.some((name) => viewerMatchesValue(name));
+          },
+          [viewerMatchesValue]
+        );
         const hasFeature = useCallback(
           (feature) => currentUserIsAdmin || currentUserFeatures.includes(feature),
           [currentUserFeatures, currentUserIsAdmin]
@@ -7536,6 +7767,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           () => entries.find((entry) => entry.id === previewEntryId) || null,
           [entries, previewEntryId]
         );
+        const previewIsReviewMode = Boolean(previewEntry && previewEntryContext === "calendar");
+        const previewCanApprove = previewIsReviewMode && previewEntry ? viewerIsApprover(previewEntry) : false;
 
         const assetTypeSummary = useMemo(() => {
           const counts = monthEntries.reduce((acc, entry) => {
@@ -7732,6 +7965,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const closeEntry = () => {
           setViewingId(null);
           setViewingSnapshot(null);
+          setPreviewEntryId("");
+          setPreviewEntryContext("default");
         };
 
         const openEntry = (id) => {
@@ -7739,15 +7974,31 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             closeEntry();
             return;
           }
-          setViewingId(id);
           const found = entries.find((entry) => entry.id === id);
-          setViewingSnapshot(found ? sanitizeEntry(found) : null);
-          if (found) {
-            markNotificationsAsReadForEntry(found.id, currentUser);
+          if (!found) {
+            closeEntry();
+            return;
           }
+          const sanitized = sanitizeEntry(found);
+          const canEdit = currentUserIsAdmin || viewerIsAuthor(sanitized);
+          if (canEdit) {
+            setPreviewEntryId("");
+            setPreviewEntryContext("default");
+            setViewingId(id);
+            setViewingSnapshot(sanitized);
+          } else {
+            setViewingId(null);
+            setViewingSnapshot(null);
+            setPreviewEntryId(id);
+            setPreviewEntryContext("calendar");
+          }
+          markNotificationsAsReadForEntry(found.id, currentUser);
         };
 
-        const closePreview = () => setPreviewEntryId("");
+        const closePreview = () => {
+          setPreviewEntryId("");
+          setPreviewEntryContext("default");
+        };
         const handlePreviewEdit = (id) => {
           if (!id) return;
           closePreview();
@@ -9029,7 +9280,10 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                     <MiniCalendar
                       monthCursor={monthCursor}
                       entries={monthEntries}
-                      onPreviewEntry={(entry) => setPreviewEntryId(entry?.id || "")}
+                      onPreviewEntry={(entry) => {
+                        setPreviewEntryId(entry?.id || "");
+                        setPreviewEntryContext(entry?.id ? "form" : "default");
+                      }}
                     />
                   </div>
                 </div>
@@ -9844,6 +10098,14 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               onEdit={handlePreviewEdit}
               currentUser={currentUser}
               currentUserEmail={currentUserEmail}
+              reviewMode={previewIsReviewMode}
+              canApprove={previewCanApprove}
+              onApprove={toggleApprove}
+              onUpdate={upsert}
+              onNotifyMentions={handleMentionNotifications}
+              onCommentAdded={handleCommentActivity}
+              approverOptions={approverOptions}
+              users={userList}
             />
             {viewingSnapshot ? (
             <EntryModal
