@@ -243,6 +243,12 @@ async function deleteUserRemote(id) {
   return toJson(r);
 }
 
+async function listAudit(params = {}) {
+  const qs = new URLSearchParams(params);
+  const r = await fetch(`/api/audit${qs.toString() ? `?${qs}` : ''}`, { method: 'GET' });
+  return toJson(r);
+}
+
 (async () => {
   const enabled = await pingServer();
   try {
@@ -280,6 +286,7 @@ async function deleteUserRemote(id) {
         createUser: createUserRemote,
         updateUser: updateUserRemote,
         deleteUser: deleteUserRemote,
+        listAudit,
       });
       try {
         window.dispatchEvent(new CustomEvent('pm-api-ready', { detail: { enabled } }));

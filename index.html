@@ -310,7 +310,7 @@
         ],
       };
 
-      const PM_PROFILE_IMAGE = "https://www.populationmatters.org/wp-content/uploads/2023/02/cropped-favicon-1-192x192.png";
+      const PM_PROFILE_IMAGE = "https://upload.wikimedia.org/wikipedia/en/thumb/3/35/Population_Matters_logo.png/240px-Population_Matters_logo.png";
       const PLATFORM_PREVIEW_META = {
         Instagram: {
           name: "Population Matters",
@@ -4246,14 +4246,20 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                           >
                             Review
                           </Button>
-                          <Button
-                            variant={entry.status === "Approved" ? "outline" : "solid"}
-                            size="sm"
-                            onClick={() => onApprove?.(entry.id)}
-                            className="heading-font text-xs normal-case"
-                          >
-                            {entry.status === "Approved" ? "Mark pending" : "Approve"}
-                          </Button>
+                          {entry.status !== "Approved" ? (
+                            <Button
+                              variant="solid"
+                              size="sm"
+                              onClick={() => onApprove?.(entry.id)}
+                              className="heading-font text-xs normal-case"
+                            >
+                              Approve
+                            </Button>
+                          ) : (
+                            <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                              Approved
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -4662,21 +4668,23 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                                 {entry.status}
                               </span>
                               <div className="flex items-center gap-1">
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    onApprove(entry.id);
-                                  }}
-                                  title="Toggle approval"
-                                >
-                                  {entry.status === "Approved" ? (
-                                    <CheckCircleIcon className="h-5 w-5 text-emerald-600" />
-                                  ) : (
+                                {entry.status !== "Approved" ? (
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      onApprove(entry.id);
+                                    }}
+                                    title="Approve entry"
+                                  >
                                     <LoaderIcon className="h-5 w-5 text-amber-600" />
-                                  )}
-                                </Button>
+                                  </Button>
+                                ) : (
+                                  <span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">
+                                    Approved
+                                  </span>
+                                )}
                                 <Button
                                   size="icon"
                                   variant="ghost"
@@ -5063,11 +5071,11 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           );
         const renderHeader = (opts = {}) => (
           <div className={cx("flex items-center gap-3 px-4 py-3", opts.wrapperClassName)}>
-            <HeaderLink className={cx("h-10 w-10 overflow-hidden rounded-full border border-white shadow", opts.avatarClassName)}>
+            <HeaderLink className={cx("h-10 w-10 overflow-hidden rounded-full border border-white bg-white shadow", opts.avatarClassName)}>
               <img
                 src={meta.avatar || PM_PROFILE_IMAGE}
                 alt={`${meta.name} avatar`}
-                className="h-full w-full object-cover"
+                className="h-full w-full object-contain p-1"
                 loading="lazy"
               />
             </HeaderLink>
@@ -5275,6 +5283,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
       function EntryModal({
         entry,
         currentUser,
+        currentUserEmail,
         onClose,
         onApprove,
         onDelete,
@@ -5321,13 +5330,23 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const draftPlatformsKey = draftPlatforms.join("|");
         const sanitizedSignature = entrySignature(sanitizedEntry);
         const modalReady = Boolean(sanitizedEntry && draft);
+        const normalizedViewer = useMemo(() => {
+          if (currentUser && currentUser.trim()) return currentUser.trim().toLowerCase();
+          if (currentUserEmail && currentUserEmail.trim()) return currentUserEmail.trim().toLowerCase();
+          return "";
+        }, [currentUser, currentUserEmail]);
         const isApproverView = useMemo(() => {
-          if (!currentUser) return false;
-          const normalized = currentUser.trim().toLowerCase();
-          if (!normalized) return false;
+          if (!normalizedViewer) return false;
           const approvers = ensurePeopleArray(sanitizedEntry?.approvers);
-          return approvers.some((name) => (name || "").trim().toLowerCase() === normalized);
-        }, [sanitizedEntry, currentUser]);
+          return approvers.some((name) => (name || "").trim().toLowerCase() === normalizedViewer);
+        }, [sanitizedEntry, normalizedViewer]);
+        const isAuthorView = useMemo(() => {
+          if (!normalizedViewer) return false;
+          const normalizedAuthor = (sanitizedEntry?.author || "").trim().toLowerCase();
+          if (!normalizedAuthor) return false;
+          return normalizedAuthor === normalizedViewer;
+        }, [sanitizedEntry, normalizedViewer]);
+        const showApproverContent = !isAuthorView || isApproverView;
 
         useEffect(() => {
           if (!sanitizedEntry) return;
@@ -5345,6 +5364,12 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           );
           setAllPlatforms(draftPlatforms.length === ALL_PLATFORMS.length);
         }, [sanitizedSignature, draftPlatformsKey]);
+
+        useEffect(() => {
+          if (!modalReady && timelineOpen) {
+            setTimelineOpen(false);
+          }
+        }, [modalReady, timelineOpen]);
 
         if (!modalReady) return null;
 
@@ -5561,6 +5586,58 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           }
         };
 
+        const loadTimeline = useCallback(
+          async (entryId) => {
+            if (!entryId) return;
+            setTimelineLoading(true);
+            setTimelineError("");
+            try {
+              let payload = null;
+              if (window.api && typeof window.api.listAudit === "function") {
+                payload = await window.api.listAudit({ entryId, limit: 200 });
+              } else {
+                const res = await fetch(`/api/audit?entryId=${encodeURIComponent(entryId)}&limit=200`, {
+                  method: "GET",
+                });
+                if (!res.ok) throw new Error(`HTTP_${res.status}`);
+                payload = await res.json();
+              }
+              setTimelineEntries(Array.isArray(payload) ? payload : []);
+            } catch (error) {
+              console.warn("Failed to load timeline", error);
+              setTimelineEntries([]);
+              setTimelineError("Unable to load timeline right now.");
+            } finally {
+              setTimelineLoading(false);
+            }
+          },
+          []
+        );
+
+        const handleOpenTimeline = () => {
+          if (!sanitizedEntry?.id) return;
+          setTimelineOpen(true);
+          loadTimeline(sanitizedEntry.id);
+        };
+
+        const closeTimeline = () => setTimelineOpen(false);
+
+        const formatTimelineAction = (action) => {
+          if (!action) return "Updated entry";
+          return action.replace(/[-_]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+        };
+
+        const parseTimelineMeta = (meta) => {
+          if (!meta) return {};
+          if (typeof meta === "object") return meta;
+          try {
+            const parsed = JSON.parse(meta);
+            return parsed && typeof parsed === "object" ? parsed : {};
+          } catch {
+            return {};
+          }
+        };
+
         const highlightMentions = (text) => {
           if (!text) return [text];
           return text.split(/(@[\w\s.&'-]+)/g).map((part, index) => {
@@ -5763,28 +5840,38 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           </div>
         );
 
+        const canApproveAction = isApproverView && draft.status !== "Approved";
+        const canEdit = isAuthorView;
+        const timelineList = Array.isArray(timelineEntries) ? timelineEntries : [];
+
         return (
+          <>
           <Modal open={modalReady} onClose={onClose}>
             <div className="bg-white">
               <div className="flex items-center justify-between border-b border-aqua-200 bg-ocean-500 px-6 py-4 text-white">
                 <div>
-                  <div className="text-lg font-semibold">{isApproverView ? "Review content" : "Edit content"}</div>
+                  <div className="text-lg font-semibold">{showApproverContent ? "Review content" : "Edit content"}</div>
                   <div className="text-xs text-aqua-100">
                     Created {new Date(draft.createdAt).toLocaleString()}
                   </div>
                 </div>
-                <span
-                  className={cx(
-                    "rounded-full px-3 py-1 text-xs font-semibold text-ocean-900",
-                    draft.status === "Approved" ? "bg-aqua-100" : "bg-amber-100"
-                  )}
-                >
-                  {draft.status}
-                </span>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={handleOpenTimeline} className="heading-font text-xs normal-case">
+                    View timeline
+                  </Button>
+                  <span
+                    className={cx(
+                      "rounded-full px-3 py-1 text-xs font-semibold text-ocean-900",
+                      draft.status === "Approved" ? "bg-aqua-100" : "bg-amber-100"
+                    )}
+                  >
+                    {draft.status}
+                  </span>
+                </div>
               </div>
 
               <div className="max-h-[70vh] space-y-6 overflow-y-auto px-6 py-6">
-                {isApproverView ? (
+                {showApproverContent ? (
                   renderApproverContent()
                 ) : (
                   <>
@@ -5922,15 +6009,9 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 </FieldRow>
 
                 <FieldRow label="Author">
-                  <select
-                    value={draft.author || ""}
-                    onChange={(event) => update("author", event.target.value || undefined)}
-                    className={cx(selectBaseClasses, "w-full")}
-                  >
-                    <option value="">Select author</option>
-                    <option value="Dan">Dan</option>
-                    <option value="Fran">Fran</option>
-                  </select>
+                  <div className="rounded-2xl border border-graystone-200 bg-graystone-50 px-3 py-2 text-sm text-graystone-700">
+                    {draft.author || "Unknown"}
+                  </div>
                 </FieldRow>
 
                 <FieldRow label="Caption">
@@ -6187,14 +6268,16 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
 
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-aqua-200 bg-aqua-50 px-6 py-4">
                 <div className="flex flex-wrap items-center gap-3">
-                  <Button
-                    variant="outline"
-                    onClick={() => onApprove(draft.id)}
-                    className="gap-2"
-                  >
-                    {draft.status === "Approved" ? "Mark as pending" : "Mark as approved"}
-                  </Button>
-                  {!isApproverView && (
+                  {canApproveAction ? (
+                    <Button
+                      variant="outline"
+                      onClick={() => onApprove(draft.id)}
+                      className="gap-2"
+                    >
+                      Mark as approved
+                    </Button>
+                  ) : null}
+                  {canEdit && (
                     <Button
                       variant="outline"
                       onClick={handleDelete}
@@ -6206,9 +6289,9 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 </div>
                 <div className="flex items-center gap-3">
                   <Button variant="ghost" onClick={onClose}>
-                    {isApproverView ? "Close" : "Cancel"}
+                    {showApproverContent ? "Close" : "Cancel"}
                   </Button>
-                  {!isApproverView && (
+                  {canEdit && (
                     <Button onClick={handleSave}>
                       Save changes
                     </Button>
@@ -6217,6 +6300,80 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               </div>
             </div>
           </Modal>
+          {timelineOpen ? (
+            <Modal open={timelineOpen} onClose={closeTimeline}>
+              <div className="flex h-full max-h-[80vh] flex-col bg-white">
+                <div className="flex items-center justify-between border-b border-graystone-200 px-6 py-4">
+                  <div>
+                    <div className="heading-font text-lg font-semibold text-ocean-900">Content timeline</div>
+                    <p className="text-xs text-graystone-500">
+                      Logged activity for this entry
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => sanitizedEntry?.id && loadTimeline(sanitizedEntry.id)}
+                      className="heading-font text-xs normal-case"
+                    >
+                      Refresh
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={closeTimeline} className="heading-font text-xs normal-case">
+                      Close
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto px-6 py-5">
+                  {timelineError ? (
+                    <div className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                      {timelineError}
+                    </div>
+                  ) : null}
+                  {timelineLoading ? (
+                    <p className="text-sm text-graystone-500">Loading timeline…</p>
+                  ) : timelineList.length ? (
+                    <div className="space-y-3">
+                      {timelineList.map((item) => {
+                        const meta = parseTimelineMeta(item.meta);
+                        const metaKeys = Object.keys(meta || {});
+                        const ts = item.ts ? new Date(item.ts).toLocaleString() : "";
+                        return (
+                          <div
+                            key={item.id || `${item.ts}-${item.action}`}
+                            className="rounded-2xl border border-graystone-200 bg-graystone-50 px-4 py-3 text-sm text-graystone-700"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="font-semibold text-ocean-800">{formatTimelineAction(item.action)}</div>
+                              <div className="text-xs text-graystone-500">{ts}</div>
+                            </div>
+                            <div className="text-xs text-graystone-500">
+                              {item.user || "System"}
+                            </div>
+                            {metaKeys.length ? (
+                              <div className="mt-2 rounded-xl bg-white px-3 py-2 text-xs text-graystone-600">
+                                {metaKeys.map((key) => (
+                                  <div key={key} className="flex items-center justify-between gap-3 border-b border-graystone-100 py-1 last:border-b-0">
+                                    <span className="font-semibold text-graystone-700">{key}</span>
+                                    <span className="text-graystone-500">
+                                      {typeof meta[key] === "object" ? JSON.stringify(meta[key]) : String(meta[key])}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-graystone-500">No timeline activity recorded yet.</p>
+                  )}
+                </div>
+              </div>
+            </Modal>
+          ) : null}
+          </>
         );
       }
 
@@ -9688,6 +9845,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             <EntryModal
               entry={viewingSnapshot}
               currentUser={currentUser}
+              currentUserEmail={currentUserEmail}
               onClose={closeEntry}
               onApprove={toggleApprove}
               onDelete={softDelete}
@@ -9748,3 +9906,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
     <script type="module" src="/public/js/apiClient.js"></script>
   </body>
 </html>
+        const [timelineOpen, setTimelineOpen] = useState(false);
+        const [timelineLoading, setTimelineLoading] = useState(false);
+        const [timelineEntries, setTimelineEntries] = useState([]);
+        const [timelineError, setTimelineError] = useState("");
