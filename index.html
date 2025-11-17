@@ -802,6 +802,69 @@
         return [];
       };
 
+      const entryDescriptor = (entry) => {
+        if (!entry) return "this entry";
+        if (entry.caption && entry.caption.trim().length) return entry.caption.trim();
+        const dateValue = entry.date ? new Date(entry.date) : null;
+        const dateLabel =
+          dateValue && !Number.isNaN(dateValue.getTime())
+            ? dateValue.toLocaleDateString()
+            : entry.date || "an unscheduled date";
+        const asset = entry.assetType || "Asset";
+        return `${asset} on ${dateLabel}`;
+      };
+
+      const entryReviewLink = (entry) => {
+        if (typeof window === "undefined" || !entry) return "";
+        try {
+          return `${window.location.origin}?entry=${encodeURIComponent(entry.id || "")}`;
+        } catch {
+          return "";
+        }
+      };
+
+      const serializeForComparison = (value) => {
+        if (value === null || value === undefined) return "";
+        if (typeof value === "object") {
+          try {
+            return JSON.stringify(value);
+          } catch {
+            return String(value);
+          }
+        }
+        return String(value);
+      };
+
+      const APPROVER_ALERT_FIELDS = [
+        "date",
+        "platforms",
+        "assetType",
+        "caption",
+        "platformCaptions",
+        "firstComment",
+        "approvalDeadline",
+        "campaign",
+        "contentPillar",
+        "previewUrl",
+        "checklist",
+        "analytics",
+        "testingFrameworkId",
+        "testingFrameworkName",
+        "workflowStatus",
+        "statusDetail",
+        "carouselSlides",
+        "designCopy",
+        "script",
+      ];
+
+      const hasApproverRelevantChanges = (previousEntry, nextEntry) => {
+        if (!nextEntry) return false;
+        if (!previousEntry) return true;
+        return APPROVER_ALERT_FIELDS.some((field) => {
+          return serializeForComparison(previousEntry[field]) !== serializeForComparison(nextEntry[field]);
+        });
+      };
+
       const ensureLinksArray = (value) => {
         if (!value) return [];
         if (Array.isArray(value)) {
@@ -900,9 +963,7 @@
         <p style="margin:0; font-size:12px; letter-spacing:0.2em; color:#94a3b8;">PM DASHBOARD</p>
         <h1 style="margin:12px 0 0; font-size:24px; color:#0f172a;">${escapeHtml(context.author)} has asked you to approve social media content</h1>
       </div>
-      <p style="margin:0 0 16px; font-size:15px; line-height:1.6;">${escapeHtml(context.author)} has asked you to take a look at some content for social media. ${
-          context.deadline ? `Please approve it by <span style="font-weight:600;">${escapeHtml(context.deadline)}</span>.` : 'Please review it when you can.'
-        } See the content below.</p>
+      <p style="margin:0 0 16px; font-size:15px; line-height:1.6;">${escapeHtml(context.author)} has asked you to take a look at some content for social media.${context.deadline ? ` Please approve it by <span style="font-weight:600;">${escapeHtml(context.deadline)}</span>.` : ""} See the content below.</p>
       <table role="presentation" style="width: 100%; border-collapse: collapse; margin-bottom: 16px;">
         <tbody>
           <tr>
@@ -2032,18 +2093,22 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
       );
 
       function EntryForm({
-        monthCursor,
         onSubmit,
         existingEntries = [],
         testingFrameworks = [],
         onPreviewAssetType,
         guidelines = DEFAULT_GUIDELINES,
         currentUser = "",
+        currentUserEmail = "",
         approverOptions = DEFAULT_APPROVERS,
       }) {
         const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
         const [approvers, setApprovers] = useState([]);
-        const [author, setAuthor] = useState(currentUser || "");
+        const currentAuthorName = useMemo(() => {
+          if (currentUser && currentUser.trim().length) return currentUser.trim();
+          if (currentUserEmail && currentUserEmail.trim().length) return currentUserEmail.trim();
+          return "";
+        }, [currentUser, currentUserEmail]);
         const [platforms, setPlatforms] = useState([]);
         const [allPlatforms, setAllPlatforms] = useState(false);
         const [caption, setCaption] = useState("");
@@ -2064,13 +2129,6 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [contentPillar, setContentPillar] = useState("");
         const [testingFrameworkId, setTestingFrameworkId] = useState("");
         const [entryFormErrors, setEntryFormErrors] = useState([]);
-
-        const dayOptions = useMemo(() => {
-          const total = daysInMonth(monthCursor.getFullYear(), monthCursor.getMonth());
-          return Array.from({ length: total }, (_, index) =>
-            new Date(monthCursor.getFullYear(), monthCursor.getMonth(), index + 1).toISOString().slice(0, 10)
-          );
-        }, [monthCursor]);
 
         useEffect(() => {
           if (allPlatforms) {
@@ -2122,13 +2180,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           setActivePreviewPlatform((prev) => (prev === "Main" || platforms.includes(prev) ? prev : platforms[0] || "Main"));
         }, [platforms]);
 
-        useEffect(() => {
-          if (currentUser) setAuthor(currentUser);
-        }, [currentUser]);
-
         const reset = () => {
           setApprovers([]);
-          setAuthor(currentUser || "");
           setPlatforms([]);
           setAllPlatforms(false);
           setCaption("");
@@ -2168,6 +2221,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           return errors;
         };
 
+        const derivedAuthor = currentAuthorName || currentUserEmail || "";
+
         const submitEntry = () => {
           const cleanedCaptions = {};
           platforms.forEach((platform) => {
@@ -2178,7 +2233,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           onSubmit({
             date,
             approvers,
-            author: author || undefined,
+            author: derivedAuthor || undefined,
             platforms: ensureArray(allPlatforms ? [...ALL_PLATFORMS] : platforms),
             caption,
             url: url || undefined,
@@ -2289,22 +2344,13 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           <div className="grid gap-6 lg:grid-cols-[2fr,1fr]">
             <div className="space-y-6">
               <div className="space-y-2">
-                <Label>Date</Label>
-                <select
+                <Label htmlFor="entry-date">Date</Label>
+                <Input
+                  id="entry-date"
+                  type="date"
                   value={date}
                   onChange={(event) => setDate(event.target.value)}
-                  className={cx(selectBaseClasses, "w-full")}
-                >
-                  {dayOptions.map((iso) => (
-                    <option key={iso} value={iso}>
-                      {new Date(iso).toLocaleDateString(undefined, {
-                        weekday: "short",
-                        day: "2-digit",
-                        month: "short",
-                      })}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
 
               <div className="space-y-2">
@@ -2418,42 +2464,19 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                     </Button>
                     <div className="flex items-center gap-2 text-xs text-amber-700">
                       <span>Try a different date:</span>
-                  <select
+                  <Input
+                    type="date"
                     value={date}
                     onChange={(event) => {
                       setOverrideConflict(false);
                       setDate(event.target.value);
                     }}
-                    className={cx(selectBaseClasses, "px-3 py-1 text-xs")}
-                  >
-                        {dayOptions.map((iso) => (
-                          <option key={iso} value={iso}>
-                            {new Date(iso).toLocaleDateString(undefined, {
-                              weekday: "short",
-                              day: "2-digit",
-                              month: "short",
-                            })}
-                          </option>
-                        ))}
-                      </select>
+                    className="px-3 py-1 text-xs"
+                  />
                     </div>
                   </div>
                 </div>
               )}
-
-              <div className="space-y-2">
-                <Label htmlFor="author">Author</Label>
-                <select
-                  id="author"
-                  value={author}
-                  onChange={(event) => setAuthor(event.target.value)}
-                  className={cx(selectBaseClasses, "w-full")}
-                >
-                  <option value="">Select author</option>
-                  <option value="Dan">Dan</option>
-                  <option value="Fran">Fran</option>
-                </select>
-              </div>
 
               <div className="space-y-3">
                 <Label>Captions</Label>
@@ -4730,7 +4753,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
 
       const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 
-      function MiniCalendar({ monthCursor, entries, onOpenEntry }) {
+      function MiniCalendar({ monthCursor, entries, onPreviewEntry }) {
         const year = monthCursor.getFullYear();
         const month = monthCursor.getMonth();
         const totalDays = daysInMonth(year, month);
@@ -4775,7 +4798,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             <CardHeader>
               <CardTitle className="text-base text-ocean-900">Month at a glance</CardTitle>
               <p className="text-xs text-graystone-500">
-                Tap a turquoise dot to open that post.
+                Tap a turquoise dot to preview that post.
               </p>
             </CardHeader>
             <CardContent>
@@ -4807,7 +4830,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                             <button
                               key={entry.id}
                               type="button"
-                              onClick={() => onOpenEntry(entry.id)}
+                              onClick={() => onPreviewEntry?.(entry)}
                               className="h-3 w-3 rounded-full bg-[#00F5FF] text-transparent transition hover:scale-125 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#00F5FF]"
                               title={`${entry.assetType} • ${entry.platforms?.join(", ") || ""}`}
                               aria-label={`Open ${entry.assetType} scheduled on ${new Date(entry.date).toLocaleDateString()}`}
@@ -4825,6 +4848,103 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               </div>
             </CardContent>
           </Card>
+        );
+      }
+
+      function EntryPreviewModal({ open, entry, onClose, onEdit }) {
+        const sanitized = useMemo(() => (entry ? sanitizeEntry(entry) : null), [entry]);
+        if (!open || !sanitized) return null;
+        const plannedPlatforms = sanitized.platforms.length ? sanitized.platforms : ["Main"];
+        const defaultPreviewPlatformCandidate =
+          plannedPlatforms.find((name) => name && name !== "Main") || null;
+        const defaultPreviewPlatform =
+          defaultPreviewPlatformCandidate ||
+          (plannedPlatforms[0] && plannedPlatforms[0] !== "Main" ? plannedPlatforms[0] : "LinkedIn");
+        const previewUrl = sanitized.previewUrl ? sanitized.previewUrl.trim() : "";
+        const previewIsImage = isImageMedia(previewUrl);
+        const previewIsVideo = previewUrl && /\.(mp4|webm|ogg)$/i.test(previewUrl);
+        const friendlyDate = sanitized.date
+          ? new Date(sanitized.date).toLocaleDateString(undefined, {
+              weekday: "short",
+              month: "short",
+              day: "numeric",
+            })
+          : "Not scheduled";
+        const descriptor = entryDescriptor(sanitized);
+        return (
+          <Modal open={open} onClose={onClose}>
+            <div className="flex h-full max-h-[80vh] flex-col bg-white">
+              <div className="flex items-center justify-between border-b border-graystone-200 px-6 py-4">
+                <div>
+                  <div className="heading-font text-lg font-semibold text-ocean-900">{descriptor}</div>
+                  <p className="text-xs text-graystone-500">
+                    Scheduled {friendlyDate} • Requested by {sanitized.author || "Unknown"}
+                  </p>
+                </div>
+                <Badge variant={sanitized.status === "Approved" ? "solid" : "outline"}>
+                  {sanitized.status}
+                </Badge>
+              </div>
+              <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
+                <div className="flex flex-wrap items-center gap-3 text-xs text-graystone-500">
+                  {sanitized.approvers?.length ? (
+                    <span>Approvers: {sanitized.approvers.join(", ")}</span>
+                  ) : (
+                    <span>No approvers selected</span>
+                  )}
+                  <span>
+                    Platforms: {plannedPlatforms.filter((platform) => platform !== "Main").join(", ") || defaultPreviewPlatform}
+                  </span>
+                </div>
+                <div className="space-y-4">
+                  {plannedPlatforms.map((platform) => {
+                    const previewPlatformName = platform === "Main" ? defaultPreviewPlatform : platform;
+                    const captionForPlatform = getPlatformCaption(
+                      sanitized.caption,
+                      sanitized.platformCaptions,
+                      platform
+                    );
+                    return (
+                      <div
+                        key={platform}
+                        className="rounded-3xl border border-graystone-200 bg-white p-4 shadow-sm"
+                      >
+                        <div className="mb-3 flex items-center justify-between text-sm font-semibold text-ocean-700">
+                          <span className="inline-flex items-center gap-2">
+                            <PlatformIcon platform={previewPlatformName} />
+                            {platform === "Main" ? "Main copy" : platform}
+                          </span>
+                          <span className="text-xs text-graystone-500">
+                            {(captionForPlatform || "").length} chars
+                          </span>
+                        </div>
+                        <SocialPreview
+                          platform={previewPlatformName}
+                          caption={captionForPlatform}
+                          mediaUrl={previewUrl}
+                          isImage={previewIsImage}
+                          isVideo={previewIsVideo}
+                        />
+                        <div className="mt-3 rounded-2xl bg-graystone-50 px-3 py-2 text-sm text-graystone-700 whitespace-pre-wrap">
+                          {captionForPlatform && captionForPlatform.trim().length
+                            ? captionForPlatform
+                            : "No caption provided."}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-3 border-t border-graystone-200 bg-graystone-50 px-6 py-4">
+                <Button variant="ghost" onClick={onClose}>
+                  Close
+                </Button>
+                <Button onClick={() => onEdit?.(sanitized.id)}>
+                  Edit entry
+                </Button>
+              </div>
+            </div>
+          </Modal>
         );
       }
 
@@ -5159,6 +5279,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         onSave,
         onUpdate,
         onNotifyMentions,
+        onCommentAdded,
         testingFrameworks = [],
         approverOptions = DEFAULT_APPROVERS,
         users = DEFAULT_USERS,
@@ -5432,6 +5553,9 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               comment,
               mentionNames: Array.from(mentionNames),
             });
+          }
+          if (onCommentAdded) {
+            onCommentAdded({ entry: next, comment });
           }
         };
 
@@ -6135,6 +6259,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const [filterPlatforms, setFilterPlatforms] = useState([]);
         const [performanceImportOpen, setPerformanceImportOpen] = useState(false);
         const [approvalsModalOpen, setApprovalsModalOpen] = useState(false);
+        const [previewEntryId, setPreviewEntryId] = useState("");
         const [menuMotionActive, setMenuMotionActive] = useState(false);
         const [changePasswordOpen, setChangePasswordOpen] = useState(false);
         const [pendingAssetType, setPendingAssetType] = useState(null);
@@ -6201,9 +6326,15 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const approverOptions = useMemo(() => {
           const derived = userList
             .filter((user) => user.isApprover && user.status !== "disabled")
-            .map((user) => (user.name && user.name.trim()) || user.email)
+            .map((user) => {
+              if (user.name && String(user.name).trim().length) return String(user.name).trim();
+              if (user.email && String(user.email).trim().length) return String(user.email).trim();
+              return "";
+            })
             .filter(Boolean);
-          if (derived.length) return derived;
+          if (derived.length) {
+            return Array.from(new Set(derived));
+          }
           return approverDirectory;
         }, [userList, approverDirectory]);
         const hydrateCurrentUser = useCallback(async () => {
@@ -6882,6 +7013,150 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           if (payload.length) addNotifications(payload);
         };
 
+        const handleCommentActivity = ({ entry, comment }) => {
+          if (!entry || !comment) return;
+          const approvers = ensurePeopleArray(entry.approvers);
+          const authorNames = ensurePeopleArray(entry.author);
+          const actorName = comment.author || currentUser || "Unknown";
+          const normalizedActor = actorName ? actorName.trim().toLowerCase() : "";
+          const recipients = new Set();
+          const addRecipientsFrom = (list) => {
+            list.forEach((name) => {
+              const trimmed = (name || "").trim();
+              if (!trimmed) return;
+              if (normalizedActor && trimmed.toLowerCase() === normalizedActor) return;
+              recipients.add(trimmed);
+            });
+          };
+          const actorIsApprover = approvers.some(
+            (name) => (name || "").trim().toLowerCase() === normalizedActor
+          );
+          const actorIsAuthor = authorNames.some(
+            (name) => (name || "").trim().toLowerCase() === normalizedActor
+          );
+          if (actorIsApprover) {
+            addRecipientsFrom(authorNames.length ? authorNames : approvers);
+          } else if (actorIsAuthor) {
+            addRecipientsFrom(approvers);
+          } else {
+            addRecipientsFrom([...authorNames, ...approvers]);
+          }
+          if (!recipients.size) return;
+          const descriptor = entryDescriptor(entry);
+          const timestamp = new Date().toISOString();
+          addNotifications(
+            Array.from(recipients).map((user) => ({
+              entryId: entry.id,
+              user,
+              type: "comment",
+              message: `${actorName} commented on ${descriptor}.`,
+              createdAt: timestamp,
+              meta: { commentId: comment.id, source: "comment" },
+              key: notificationKey("comment", entry.id, user, { commentId: comment.id }),
+            }))
+          );
+          if (window.api && window.api.enabled) {
+            try {
+              const link = entryReviewLink(entry);
+              const rawSnippet = comment.body || "";
+              const snippet = rawSnippet.length > 600 ? `${rawSnippet.slice(0, 600)}…` : rawSnippet;
+              const textParts = [
+                `${actorName} commented on "${descriptor}".`,
+                snippet ? snippet : "",
+                link ? `Review: ${link}` : "",
+              ].filter(Boolean);
+              const text = textParts.join("\n\n");
+              const htmlSnippet = snippet ? escapeHtml(snippet).replace(/\n/g, "<br />") : "";
+              const html = `
+                <div style="font-family:'Helvetica Neue',Arial,sans-serif; font-size:14px; color:#0f172a;">
+                  <p><strong>${escapeHtml(actorName)}</strong> commented on <strong>${escapeHtml(
+                    descriptor
+                  )}</strong>.</p>
+                  ${
+                    htmlSnippet
+                      ? `<blockquote style="margin:12px 0; padding:12px; background:#f1f5f9; border-left:3px solid #0A66C2;">${htmlSnippet}</blockquote>`
+                      : ""
+                  }
+                  ${
+                    link
+                      ? `<p style="margin:0;"><a href="${escapeHtml(
+                          link
+                        )}" style="color:#0A66C2; text-decoration:none;">Review this entry</a></p>`
+                      : ""
+                  }
+                </div>
+              `.trim();
+              window.api
+                .notify({
+                  approvers: Array.from(recipients),
+                  to: Array.from(recipients),
+                  subject: `[PM Dashboard] New comment on ${descriptor}`,
+                  text,
+                  html,
+                })
+                .catch(() => {});
+            } catch {}
+          }
+        };
+
+        const notifyApproversAboutChange = (entry) => {
+          if (!entry) return;
+          const approvers = ensurePeopleArray(entry.approvers);
+          if (!approvers.length) return;
+          const actorName = currentUser || "A teammate";
+          const normalizedActor = actorName.trim().toLowerCase();
+          const recipients = approvers
+            .map((name) => (name || "").trim())
+            .filter((name) => name && name.toLowerCase() !== normalizedActor);
+          if (!recipients.length) return;
+          const descriptor = entryDescriptor(entry);
+          const timestamp = new Date().toISOString();
+          addNotifications(
+            recipients.map((user) => ({
+              entryId: entry.id,
+              user,
+              type: "approval-update",
+              message: `${actorName} updated ${descriptor}.`,
+              createdAt: timestamp,
+              meta: { source: "entry-update" },
+              key: notificationKey("approval-update", entry.id, user),
+            }))
+          );
+          if (window.api && window.api.enabled) {
+            try {
+              const link = entryReviewLink(entry);
+              const textLines = [
+                `${actorName} updated "${descriptor}".`,
+                link ? `Review: ${link}` : "",
+              ].filter(Boolean);
+              const text = textLines.join("\n\n");
+              const html = `
+                <div style="font-family:'Helvetica Neue',Arial,sans-serif; font-size:14px; color:#0f172a;">
+                  <p><strong>${escapeHtml(actorName)}</strong> updated <strong>${escapeHtml(
+                    descriptor
+                  )}</strong>.</p>
+                  ${
+                    link
+                      ? `<p style="margin:0;"><a href="${escapeHtml(
+                          link
+                        )}" style="color:#0A66C2; text-decoration:none;">Review this entry</a></p>`
+                      : ""
+                  }
+                </div>
+              `.trim();
+              window.api
+                .notify({
+                  approvers: recipients,
+                  to: recipients,
+                  subject: `[PM Dashboard] ${actorName} updated ${descriptor}`,
+                  text,
+                  html,
+                })
+                .catch(() => {});
+            } catch {}
+          }
+        };
+
         const addIdea = (idea) => {
           const timestamp = new Date().toISOString();
           const sanitized = sanitizeIdea({
@@ -7094,6 +7369,11 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
             .sort((a, b) => a.date.localeCompare(b.date));
         }, [entries, startISO, endISO, filterType, filterStatus, filterPlatforms]);
 
+        const previewEntry = useMemo(
+          () => entries.find((entry) => entry.id === previewEntryId) || null,
+          [entries, previewEntryId]
+        );
+
         const assetTypeSummary = useMemo(() => {
           const counts = monthEntries.reduce((acc, entry) => {
             acc[entry.assetType] = (acc[entry.assetType] || 0) + 1;
@@ -7304,6 +7584,13 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           }
         };
 
+        const closePreview = () => setPreviewEntryId("");
+        const handlePreviewEdit = (id) => {
+          if (!id) return;
+          closePreview();
+          openEntry(id);
+        };
+
         useEffect(() => {
           if (!viewingId) {
             setViewingSnapshot(null);
@@ -7437,6 +7724,8 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         const upsert = (updated) => {
           const timestamp = new Date().toISOString();
           let approvalNotifications = [];
+          const pendingApproverAlerts = [];
+          const normalizedActor = (currentUser || "").trim().toLowerCase();
           setEntries((prev) =>
             prev.map((entry) =>
               entry.id === updated.id
@@ -7457,6 +7746,18 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                         buildApprovalNotifications(sanitized, newApprovers)
                       );
                     }
+                    const actorIsApprover = normalizedActor
+                      ? nextApprovers.some(
+                          (name) => (name || "").trim().toLowerCase() === normalizedActor
+                        )
+                      : false;
+                    if (
+                      hasApproverRelevantChanges(entry, sanitized) &&
+                      nextApprovers.length &&
+                      !actorIsApprover
+                    ) {
+                      pendingApproverAlerts.push(sanitized);
+                    }
                     return {
                       ...sanitized,
                       statusDetail: computeStatusDetail(sanitized),
@@ -7467,6 +7768,9 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
           );
           if (approvalNotifications.length) {
             addNotifications(approvalNotifications);
+          }
+          if (pendingApproverAlerts.length) {
+            pendingApproverAlerts.forEach((entry) => notifyApproversAboutChange(entry));
           }
           if (window.api && window.api.enabled && updated?.id) {
             try {
@@ -8514,50 +8818,56 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-aqua-200 pb-3">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1))
-                      }
-                    >
-                      Prev
-                    </Button>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-black px-4 py-2 text-sm font-semibold text-graystone-800">
-                      <CalendarIcon className="h-4 w-4 text-ocean-600" />
-                      {monthLabel}
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1))
-                      }
-                    >
-                      Next
-                    </Button>
-                  </div>
-                  <p className="text-xs text-graystone-600">Choose the month to populate the day picker below.</p>
-                </div>
-
                 <div className="grid gap-6 lg:grid-cols-[minmax(0,1.8fr)_minmax(260px,1fr)]">
                   <div className="w-full">
                 <EntryForm
-                  key={startISO}
-                  monthCursor={monthCursor}
                   onSubmit={addEntry}
                   existingEntries={entries.filter((entry) => !entry.deletedAt)}
                   testingFrameworks={testingFrameworks}
                   onPreviewAssetType={setPendingAssetType}
                   guidelines={guidelines}
                   currentUser={currentUser}
+                  currentUserEmail={currentUserEmail}
                   approverOptions={approverOptions}
                 />
                   </div>
                   <div className="flex w-full flex-col gap-6">
-                    <MiniCalendar monthCursor={monthCursor} entries={monthEntries} onOpenEntry={openEntry} />
+                    <div className="rounded-3xl border border-aqua-200 bg-white px-4 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="inline-flex items-center gap-2 rounded-full border border-black px-4 py-2 text-sm font-semibold text-graystone-800">
+                          <CalendarIcon className="h-4 w-4 text-ocean-600" />
+                          {monthLabel}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1))
+                            }
+                          >
+                            Prev
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1))
+                            }
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-xs text-graystone-500">
+                        This selector only updates the Month at a glance calendar.
+                      </p>
+                    </div>
+                    <MiniCalendar
+                      monthCursor={monthCursor}
+                      entries={monthEntries}
+                      onPreviewEntry={(entry) => setPreviewEntryId(entry?.id || "")}
+                    />
                   </div>
                 </div>
               </div>
@@ -9364,6 +9674,12 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
                 </Card>
               </div>
             )}
+            <EntryPreviewModal
+              open={Boolean(previewEntry)}
+              entry={previewEntry}
+              onClose={closePreview}
+              onEdit={handlePreviewEdit}
+            />
             {viewingSnapshot ? (
             <EntryModal
               entry={viewingSnapshot}
@@ -9374,6 +9690,7 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
               onSave={upsert}
               onUpdate={upsert}
               onNotifyMentions={handleMentionNotifications}
+              onCommentAdded={handleCommentActivity}
               testingFrameworks={testingFrameworks}
               approverOptions={approverOptions}
               users={userList}

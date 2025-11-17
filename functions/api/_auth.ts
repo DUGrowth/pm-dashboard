@@ -17,6 +17,7 @@ const NAME_HEADERS = [
 
 const SESSION_COOKIE = 'pm_session';
 const ACCESS_OVERRIDE_COOKIE = 'pm_access_override';
+const ENV_REQUIRE_SESSION = 'ACCESS_REQUIRE_SESSION';
 const BASE_FEATURES = ['calendar', 'kanban', 'approvals', 'ideas', 'linkedin', 'testing'];
 const ADMIN_FEATURES = [...BASE_FEATURES, 'admin'];
 
@@ -181,6 +182,7 @@ export async function authorizeRequest(request: Request, env: any): Promise<Auth
   await ensureDefaultOwner(env);
   const cookies = parseCookies(request.headers.get('cookie'));
   const accessOverride = cookies[ACCESS_OVERRIDE_COOKIE] === '1';
+  const requireLocalSession = String(env?.[ENV_REQUIRE_SESSION] || '').trim() === '1';
   if (env.ALLOW_UNAUTHENTICATED === '1' || env.ACCESS_ALLOW_UNAUTHENTICATED === '1') {
     const email = env.DEV_AUTH_EMAIL || 'dev@example.com';
     const name = env.DEV_AUTH_NAME || 'Dev User';
@@ -205,7 +207,8 @@ export async function authorizeRequest(request: Request, env: any): Promise<Auth
     return { ok: true, user: sessionUser };
   }
 
-  const accessUser = accessOverride ? null : await authorizeViaAccess(request, env);
+  const allowAccessFallback = !requireLocalSession && !accessOverride;
+  const accessUser = allowAccessFallback ? await authorizeViaAccess(request, env) : null;
   if (accessUser && !('error' in accessUser)) {
     return { ok: true, user: accessUser };
   }

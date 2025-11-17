@@ -52,6 +52,7 @@ Authentication & user management
 - Signed-in teammates can update their password from the Menu → “Change password” action, which calls `/api/password`, rotates their session cookie, and invalidates older sessions.
 - User records also track optional avatars (`avatarUrl`) and whether they’re approvers (`isApprover`). Teammates can open the profile dropdown to update their display name/photo through `PUT /api/user`.
 - Approvers are managed directly through the roster: admins toggle the role per user, and the `/api/approvers` endpoint exposes the active directory to entry forms and notification flows.
+- If you keep Cloudflare Access in front of the dashboard but still want users to hit the PM password screen, set `ACCESS_REQUIRE_SESSION=1` so `_auth` ignores Access headers unless a PM session cookie already exists.
 
 Local Development
 1) Serve `index.html` with any static server (or Cloudflare Pages dev).
