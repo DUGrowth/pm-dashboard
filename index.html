@@ -58,6 +58,8 @@
         min-height: 100vh;
         font-family: "Neue Haas Grotesk Display Pro", "Helvetica Neue", Arial, sans-serif;
         letter-spacing: -0.01em;
+        word-break: break-word;
+        overflow-wrap: anywhere;
       }
 
       h1,
@@ -1169,7 +1171,7 @@ const computeMentionState = (value, cursor, names) => {
 const MentionSuggestionList = ({ suggestions, onSelect }) => {
   if (!suggestions || !suggestions.length) return null;
   return (
-    <div className="mt-1 max-h-48 overflow-y-auto rounded-xl border border-graystone-200 bg-white shadow-lg">
+    <div className="pointer-events-auto absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-xl border border-graystone-200 bg-white shadow-lg">
       {suggestions.map((name) => (
         <button
           type="button"
@@ -2129,9 +2131,9 @@ const MentionSuggestionList = ({ suggestions, onSelect }) => {
       };
 
       const FieldRow = ({ label, children }) => (
-        <div className="grid grid-cols-3 gap-4">
-          <div className="col-span-1 pt-2 text-sm font-medium text-graystone-700">{label}</div>
-          <div className="col-span-2 space-y-2 text-sm text-graystone-800">{children}</div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-4">
+          <div className="text-sm font-medium text-graystone-700 sm:pt-2">{label}</div>
+          <div className="space-y-2 text-sm text-graystone-800 sm:col-span-2">{children}</div>
         </div>
       );
 
@@ -2851,7 +2853,7 @@ const MentionSuggestionList = ({ suggestions, onSelect }) => {
           )}
         </div>
         <div className="flex-1">
-          <div className="font-medium text-graystone-700">{attachment.name}</div>
+          <div className="break-words font-medium text-graystone-700">{attachment.name}</div>
           {attachment.size ? (
             <div className="text-xs text-graystone-500">{Math.round(attachment.size / 1024)} KB</div>
           ) : null}
@@ -4532,10 +4534,10 @@ const MentionSuggestionList = ({ suggestions, onSelect }) => {
                           <span className="text-xs text-graystone-500">by {idea.createdBy}</span>
                         ) : null}
                       </div>
-                      <div className="text-lg font-semibold text-ocean-900">{idea.title}</div>
-                      {idea.notes && <p className="text-sm text-graystone-700 whitespace-pre-wrap">{idea.notes}</p>}
+                      <div className="break-words text-lg font-semibold text-ocean-900">{idea.title}</div>
+                      {idea.notes && <p className="break-words text-sm text-graystone-700 whitespace-pre-wrap">{idea.notes}</p>}
                       {idea.inspiration && (
-                        <div className="rounded-xl bg-aqua-50 p-3 text-xs text-ocean-700">
+                        <div className="break-words rounded-xl bg-aqua-50 p-3 text-xs text-ocean-700">
                           <span className="font-semibold">Inspiration:</span> {idea.inspiration}
                         </div>
                       )}
@@ -4545,7 +4547,12 @@ const MentionSuggestionList = ({ suggestions, onSelect }) => {
                           <ul className="space-y-1 text-sm text-ocean-600">
                             {idea.links.map((link, index) => (
                               <li key={index}>
-                                <a href={link} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                                <a
+                                  href={link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="break-words hover:underline"
+                                >
                                   {link}
                                 </a>
                               </li>
@@ -5099,7 +5106,9 @@ const MentionSuggestionList = ({ suggestions, onSelect }) => {
                         rows={3}
                         placeholder="Share feedback or @mention an approver"
                       />
-                      <MentionSuggestionList suggestions={mentionSuggestions} onSelect={handleMentionSelect} />
+                      <div className="relative">
+                        <MentionSuggestionList suggestions={mentionSuggestions} onSelect={handleMentionSelect} />
+                      </div>
                       <div className="flex items-center justify-end">
                         <Button type="submit" disabled={!commentDraft.trim()}>
                           Add comment
@@ -6011,7 +6020,9 @@ const MentionSuggestionList = ({ suggestions, onSelect }) => {
                 rows={3}
                 placeholder="Share feedback or mention someone with @"
               />
-              <MentionSuggestionList suggestions={mentionSuggestions} onSelect={handleMentionSelect} />
+              <div className="relative">
+                <MentionSuggestionList suggestions={mentionSuggestions} onSelect={handleMentionSelect} />
+              </div>
               <div className="flex items-center justify-end">
                 <Button type="submit" disabled={!commentDraft.trim()}>
                   Add comment
@@ -6484,8 +6495,9 @@ const MentionSuggestionList = ({ suggestions, onSelect }) => {
                     <Button
                       variant="outline"
                       onClick={handleDelete}
+                      className="gap-2 text-graystone-700"
                     >
-                      <TrashIcon className="h-4 w-4 text-white" />
+                      <TrashIcon className="h-4 w-4 text-graystone-700" />
                       Move to trash
                     </Button>
                   )}
@@ -9776,7 +9788,7 @@ const MentionSuggestionList = ({ suggestions, onSelect }) => {
                                       weekday: "short",
                                     })}
                                   </span>
-                                  <span className="rounded-full bg-aqua-100 px-2 py-1 text-xs font-medium text-ocean-700">
+                                  <span className="max-w-[140px] truncate rounded-full bg-aqua-100 px-2 py-1 text-xs font-medium text-ocean-700">
                                     {entry.statusDetail}
                                   </span>
                                 </div>
@@ -9792,7 +9804,7 @@ const MentionSuggestionList = ({ suggestions, onSelect }) => {
                                 {(entry.campaign || entry.contentPillar || entry.testingFrameworkName) && (
                                   <div className="flex flex-wrap items-center gap-1 text-[11px] text-graystone-500">
                                     {entry.campaign ? (
-                                      <span className="rounded-full bg-aqua-100 px-2 py-0.5 text-ocean-700">
+                                      <span className="max-w-[140px] truncate rounded-full bg-aqua-100 px-2 py-0.5 text-ocean-700">
                                         {entry.campaign}
                                       </span>
                                     ) : null}
@@ -9802,7 +9814,7 @@ const MentionSuggestionList = ({ suggestions, onSelect }) => {
                                       </span>
                                     ) : null}
                                     {entry.testingFrameworkName ? (
-                                      <span className="rounded-full bg-ocean-500/10 px-2 py-0.5 text-ocean-700">
+                                      <span className="max-w-[160px] truncate rounded-full bg-ocean-500/10 px-2 py-0.5 text-ocean-700">
                                         Test: {entry.testingFrameworkName}
                                       </span>
                                     ) : null}
