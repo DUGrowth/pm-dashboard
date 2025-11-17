@@ -9900,13 +9900,9 @@ const buildEntryEmailPayload = (entry, opts = {}) => {
         );
       }
 
-      ReactDOM.createRoot(document.getElementById("root")).render(<ContentDashboard />);
-    </script>
-    <script type="module" src="/public/js/copyCheckerClient.js"></script>
-    <script type="module" src="/public/js/apiClient.js"></script>
-  </body>
+  ReactDOM.createRoot(document.getElementById("root")).render(<ContentDashboard />);
+</script>
+<script type="module" src="/public/js/copyCheckerClient.js"></script>
+<script type="module" src="/public/js/apiClient.js"></script>
+</body>
 </html>
-        const [timelineOpen, setTimelineOpen] = useState(false);
-        const [timelineLoading, setTimelineLoading] = useState(false);
-        const [timelineEntries, setTimelineEntries] = useState([]);
-        const [timelineError, setTimelineError] = useState("");
